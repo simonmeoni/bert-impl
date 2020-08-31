@@ -1,0 +1,37 @@
+# This is a basic workflow to help you get started with Actions
+
+name: CI
+
+# Controls when the action will run. Triggers the workflow on push or pull request
+# events but only for the master branch
+on:
+  push:
+    branches: '**'
+  pull_request:
+    branches: '**'
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "build"
+  build:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      - uses: actions/checkout@v1
+      # pylint step
+      - uses: cclauss/GitHub-Action-for-pylint@0.7.0
+        with:
+          args: 'pylint src/bert_implementation.py'
+      # rm temporarily the init file
+      - uses: JesseTG/rm@v1.0.0
+        with:
+          path: ./src/__init__.py
+
+      - uses: deep5050/autopy-lot@1.1
+        with:
+          github_token: ${{secrets.GITHUB_TOKEN}}
+          input_type: py
+          output_type: ipynb
+          output_dir: './'
