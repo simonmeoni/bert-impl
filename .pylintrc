@@ -1,0 +1,3 @@
+[MESSAGES CONTROL]
+# enable R903 and E0401 the code will be more robust
+disable=C0116, C0115, C0114, W0221, E0401, R0903
