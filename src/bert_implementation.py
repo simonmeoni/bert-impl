@@ -33,7 +33,7 @@
 # + pycharm={"name": "#%%\n"}
 import math
 import copy
-# import torch
+import torch
 from torch import nn
 
 
@@ -46,14 +46,20 @@ from torch import nn
 
 # + pycharm={"name": "#%%\n"}
 class Bert(nn.Module):
-    def __init__(self, encoder, stack_size=6):
+    def __init__(self, encoder, stack_size, embedding_dim, num_embeddings):
         super().__init__()
+        self.emb = nn.Embedding(
+            embedding_dim=embedding_dim,
+            num_embeddings=num_embeddings
+        )
         self.encoder_layer = nn.ModuleList()
+        # self.pos_enc = PositionalEncoding()
         for _ in range(stack_size):
             self.encoderLayer.append(copy.deepcopy(encoder))
 
     def forward(self, tokens):
-        representation = self.encoderLayer[0](tokens)
+        embeddings = self.emb(tokens)
+        representation = self.encoderLayer[0](embeddings)
         for encoder in self.encoderLayer:
             representation = encoder(representation)
         return representation
@@ -75,10 +81,12 @@ class Encoder(nn.Module):
     def __init__(self, hidden_size, output_size):
         super().__init__()
         self.mh_att = copy.deepcopy(MultiHeadAttention(2))
+        self.add_norm_l1 = AddNormalizeLayer(output_size)
         self.feed_forward_network = nn.Linear(hidden_size, output_size)
+        self.add_norm_l2 = AddNormalizeLayer(output_size)
 
-    def forward(self, tokens):
-        representations = self.mh_att(tokens)
+    def forward(self, embeddings):
+        representations = self.mh_att(embeddings)
         return self.ffnn(representations)
 
 
@@ -94,7 +102,7 @@ class MultiHeadAttention(nn.Module):
         self.w_o = None
         self.att_heads = nn.ModuleList()
         for _ in range(att_head_number):
-            self.att_heads.append(Attention(10, 10))
+            self.att_heads.append(Attention())
 
     def forward(self, tokens):
         z_n = []
@@ -105,12 +113,8 @@ class MultiHeadAttention(nn.Module):
 
 
 class Attention(nn.Module):
-    def __init__(self, embedding_dim, num_embeddings):
+    def __init__(self):
         super().__init__()
-        self.emb = nn.Embedding(
-            embedding_dim=embedding_dim,
-            num_embeddings=num_embeddings
-        )
         self.w_query = None
         self.w_key = None
         self.w_vector = None
@@ -125,9 +129,32 @@ class Attention(nn.Module):
         # dot product or matrix multiplication ?
         # I confused and merge multi-head attention and self-attention
         return nn.Softmax((query * key.t()) / math.sqrt(8) * value)
+
+
+# -
+
+# ## Add & Normalize Layer
+
+# + pycharm={"name": "#%%\n"}
+class AddNormalizeLayer(nn.Module):
+    def __init__(self, normalized_shape):
+        super().__init__()
+        self.layer_norm = nn.LayerNorm(normalized_shape)
+
+    def forward(self, x, z):
+        cat = torch.cat((x, z), 0)
+        return self.layer_norm(cat)
 # -
 
 # ## Pre-Training & Fine-Tuning
+
+# ### Task #1 : Masked LM
+#
+#
+
+# ### Task #2 : Next sentence Prediction
+
+# ### Fine Tuning
 
 # + [markdown] pycharm={"name": "#%% md\n"}
 # ## Experimentation
