@@ -141,8 +141,8 @@ class AddNormalizeLayer(nn.Module):
         super().__init__()
         self.layer_norm = nn.LayerNorm(normalized_shape)
 
-    def forward(self, x, z):
-        cat = torch.cat((x, z), 0)
+    def forward(self, x_n, z_n):
+        cat = torch.cat((x_n, z_n), 0)
         return self.layer_norm(cat)
 # -
 
