@@ -26,7 +26,7 @@
 # The Bert model has only one encoders stack.
 # So for this part, I am using the architecture described by the paper above.
 #
-# ![architecture](https://tinyurl.com/yye57wlx)
+# ![architecture](https://tinyurl.com/y5ck5j7c)
 
 # ### Requirements
 
@@ -93,7 +93,7 @@ class Encoder(nn.Module):
 # -
 
 # ### Self Attention
-# ![attention](https://tinyurl.com/y6qzem5l)
+# ![attention](https://tinyurl.com/y47nyfeg)
 
 # + pycharm={"name": "#%%\n"}
 class MultiHeadAttention(nn.Module):
