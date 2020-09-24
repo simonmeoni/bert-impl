@@ -98,10 +98,15 @@ class Encoder(nn.Module):
 # ![attention](https://tinyurl.com/y47nyfeg)
 
 # + pycharm={"name": "#%%\n"}
+
+def init_weights(x_n, y_n):
+    return nn.init.xavier_uniform(torch.empty(x_n, y_n))
+
+
 class MultiHeadAttention(nn.Module):
     def __init__(self, multi_head_size, tokens_size, dim_w_matrices):
         super().__init__()
-        self.w_o = None
+        self.w_o = Parameter(init_weights(dim_w_matrices, tokens_size))
         self.att_heads = nn.ModuleList()
         for _ in range(multi_head_size):
             self.att_heads.append(Attention(tokens_size,dim_w_matrices))
@@ -110,8 +115,7 @@ class MultiHeadAttention(nn.Module):
         z_n = []
         for head in self.att_heads:
             z_n.append(head(tokens))
-        # cat_zn = torch.cat(z_n)
-        return z_n * self.w_o
+        return torch.cat(z_n) * self.w_o
 
 
 class Attention(nn.Module):
@@ -120,12 +124,9 @@ class Attention(nn.Module):
         self.tokens_size = tokens_size
         self.dim_w_matrices = dim_w_matrices
 
-        self.w_query = Parameter(self.init_weights())
-        self.w_key = Parameter(self.init_weights())
-        self.w_vector = Parameter(self.init_weights())
-
-    def init_weights(self):
-        return nn.init.xavier_uniform(torch.empty(self.tokens_size, self.dim_w_matrices))
+        self.w_query = Parameter(init_weights(self.tokens_size, self.dim_w_matrices))
+        self.w_key = Parameter(init_weights(self.tokens_size, self.dim_w_matrices))
+        self.w_vector = Parameter(init_weights(self.tokens_size, self.dim_w_matrices))
 
     def forward(self, tokens):
         query = self.w_query * tokens
@@ -145,7 +146,7 @@ class AddNormalizeLayer(nn.Module):
         self.layer_norm = nn.LayerNorm(normalized_shape)
 
     def forward(self, x_n, z_n):
-        cat = torch.cat((x_n, z_n), 0)
+        cat = torch.cat(x_n, z_n)
         return self.layer_norm(cat)
 # -
 
