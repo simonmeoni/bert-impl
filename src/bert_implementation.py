@@ -31,10 +31,12 @@
 # ### Requirements
 
 # + pycharm={"name": "#%%\n"}
-import math
 import copy
+import math
 import torch
+
 from torch import nn
+from torch.nn.parameter import Parameter
 
 
 # -
@@ -46,7 +48,7 @@ from torch import nn
 
 # + pycharm={"name": "#%%\n"}
 class Bert(nn.Module):
-    def __init__(self, encoder, stack_size, embedding_dim, num_embeddings):
+    def __init__(self, stack_size, embedding_dim, num_embeddings, encoder):
         super().__init__()
         self.emb = nn.Embedding(
             embedding_dim=embedding_dim,
@@ -78,12 +80,12 @@ class Bert(nn.Module):
 
 # + pycharm={"name": "#%%\n"}
 class Encoder(nn.Module):
-    def __init__(self, hidden_size, output_size):
+    def __init__(self, hidden_size, dim_w_matrices, multi_head_size, tokens_size):
         super().__init__()
-        self.mh_att = copy.deepcopy(MultiHeadAttention(2))
-        self.add_norm_l1 = AddNormalizeLayer(output_size)
-        self.feed_forward_network = nn.Linear(hidden_size, output_size)
-        self.add_norm_l2 = AddNormalizeLayer(output_size)
+        self.mh_att = MultiHeadAttention(multi_head_size, tokens_size, dim_w_matrices)
+        self.add_norm_l1 = AddNormalizeLayer(dim_w_matrices)
+        self.feed_forward_network = nn.Linear(hidden_size, dim_w_matrices)
+        self.add_norm_l2 = AddNormalizeLayer(dim_w_matrices)
 
     def forward(self, embeddings):
         representations = self.mh_att(embeddings)
@@ -97,12 +99,12 @@ class Encoder(nn.Module):
 
 # + pycharm={"name": "#%%\n"}
 class MultiHeadAttention(nn.Module):
-    def __init__(self, att_head_number):
+    def __init__(self, multi_head_size, tokens_size, dim_w_matrices):
         super().__init__()
         self.w_o = None
         self.att_heads = nn.ModuleList()
-        for _ in range(att_head_number):
-            self.att_heads.append(Attention())
+        for _ in range(multi_head_size):
+            self.att_heads.append(Attention(tokens_size,dim_w_matrices))
 
     def forward(self, tokens):
         z_n = []
@@ -113,22 +115,23 @@ class MultiHeadAttention(nn.Module):
 
 
 class Attention(nn.Module):
-    def __init__(self):
+    def __init__(self, tokens_size, dim_w_matrices):
         super().__init__()
-        self.w_query = None
-        self.w_key = None
-        self.w_vector = None
+        self.tokens_size = tokens_size
+        self.dim_w_matrices = dim_w_matrices
+
+        self.w_query = Parameter(self.init_weights())
+        self.w_key = Parameter(self.init_weights())
+        self.w_vector = Parameter(self.init_weights())
+
+    def init_weights(self):
+        return nn.init.xavier_uniform(torch.empty(self.tokens_size, self.dim_w_matrices))
 
     def forward(self, tokens):
-        emb = self.emb(tokens)
-        # use dot product instead
-        query = self.w_query * emb
-        key = self.w_key * emb
-        value = self.w_vector * emb
-        # use matrix form to simplify the code
-        # dot product or matrix multiplication ?
-        # I confused and merge multi-head attention and self-attention
-        return nn.Softmax((query * key.t()) / math.sqrt(8) * value)
+        query = self.w_query * tokens
+        key = self.w_key * tokens
+        value = self.w_vector * tokens
+        return nn.Softmax((query * key.t()) / math.sqrt(self.dim_w_matrices) * value)
 
 
 # -
