@@ -55,13 +55,13 @@ class Bert(nn.Module):
             num_embeddings=num_embeddings
         )
         self.encoder_layer = nn.ModuleList()
-        # self.pos_enc = PositionalEncoding()
+        self.pos_enc = PositionalEncoding(embedding_dim)
         for _ in range(stack_size):
             self.encoderLayer.append(copy.deepcopy(encoder))
 
     def forward(self, tokens):
-        embeddings = self.emb(tokens)
-        representation = self.encoderLayer[0](embeddings)
+        cat_tokens = torch.cat(self.emb(tokens), self.pos_enc)
+        representation = self.encoderLayer[0](cat_tokens)
         for encoder in self.encoderLayer:
             representation = encoder(representation)
         return representation
@@ -91,13 +91,13 @@ class Encoder(nn.Module):
         representations = self.mh_att(embeddings)
         return self.ffnn(representations)
 
-
 # -
 
 # ### Self Attention
 # ![attention](https://tinyurl.com/y47nyfeg)
 
 # + pycharm={"name": "#%%\n"}
+
 
 def init_weights(x_n, y_n):
     return nn.init.xavier_uniform(torch.empty(x_n, y_n))
@@ -140,6 +140,7 @@ class Attention(nn.Module):
 # ## Add & Normalize Layer
 
 # + pycharm={"name": "#%%\n"}
+
 class AddNormalizeLayer(nn.Module):
     def __init__(self, normalized_shape):
         super().__init__()
@@ -148,6 +149,21 @@ class AddNormalizeLayer(nn.Module):
     def forward(self, x_n, z_n):
         cat = torch.cat(x_n, z_n)
         return self.layer_norm(cat)
+# -
+
+# -
+
+# ## Positional Encoding
+
+# + pycharm={"name": "#%%\n"}
+
+class PositionalEncoding(nn.Module):
+    def __init__(self, model_dim):
+        super().__init__()
+        self.model_dim = model_dim
+
+    def forward(self, pos):
+        return torch.sin(pos/1000^(2/self.model_dim))
 # -
 
 # ## Pre-Training & Fine-Tuning
