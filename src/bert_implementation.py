@@ -6,15 +6,15 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.5.2
+#       jupytext_version: 1.6.0
 #   kernelspec:
-#     display_name: Python 3
+#     display_name: 'Python 3.7.9 64-bit (''bert'': conda)'
 #     language: python
-#     name: python3
+#     name: python_defaultSpec_1601643765038
 # ---
 
 # + [markdown] pycharm={"name": "#%% md\n"}
-# # BERT: Pre-Training of Bidrectional Tranformers for Language Understanding
+# # BERT: Pre-Training of Bidirectional Tranformers for Language Understanding
 # **see the full paper [here](https://arxiv.org/pdf/1810.04805.pdf)**
 # -
 
@@ -149,8 +149,6 @@ class AddNormalizeLayer(nn.Module):
     def forward(self, x_n, z_n):
         cat = torch.cat(x_n, z_n)
         return self.layer_norm(cat)
-# -
-
 # -
 
 # ## Positional Encoding
