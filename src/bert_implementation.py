@@ -9,8 +9,10 @@
 #       jupytext_version: 1.6.0
 #   kernelspec:
 #     display_name: 'Python 3.7.9 64-bit (''bert'': conda)'
-#     language: python
-#     name: python_defaultSpec_1601643765038
+#     metadata:
+#       interpreter:
+#         hash: 52a97d57a70876463eed4fac2064bbbe8674799a9b35183dbfc475f4ebf43b46
+#     name: 'Python 3.7.9 64-bit (''bert'': conda)'
 # ---
 
 # + [markdown] pycharm={"name": "#%% md\n"}
@@ -34,7 +36,9 @@
 import copy
 import math
 import torch
+import spacy
 
+import pandas as pd
 from torch import nn
 from torch.nn.parameter import Parameter
 
@@ -137,7 +141,7 @@ class Attention(nn.Module):
 
 # -
 
-# ## Add & Normalize Layer
+# ### Add & Normalize Layer
 
 # + pycharm={"name": "#%%\n"}
 
@@ -151,7 +155,7 @@ class AddNormalizeLayer(nn.Module):
         return self.layer_norm(cat)
 # -
 
-# ## Positional Encoding
+# ### Positional Encoding
 
 # + pycharm={"name": "#%%\n"}
 
@@ -162,7 +166,106 @@ class PositionalEncoding(nn.Module):
 
     def forward(self, pos):
         return torch.sin(pos/1000^(2/self.model_dim))
+
+
 # -
+
+# ## Dataset : Analyze & Vectorization
+
+# ### import csv
+
+train_csv = pd.read_csv('./input/tweet-sentiment-extraction/train.csv')
+test_df =  pd.read_csv('./input/tweet-sentiment-extraction/test.csv')
+train_csv.head()
+
+# ### split & create training, evaluation & test datasets
+
+# + tags=[]
+len_train_csv = len(train_csv)
+len_test_df = len(test_df)
+total_size = len_train_csv + len_test_df
+
+train_df = train_csv.iloc[:int(len_train_csv*70/100)]
+eval_df = train_csv.iloc[int(len_train_csv*70/100):]
+
+print(
+"""size of train.csv file : {0}
+size of test.csv file : {1}
+total size : {2}
+
+size of train datset : {3}
+size of eval datset : {4}
+size of test datset : {2}
+""".format(
+    len_train_csv,
+    len_test_df,
+    total_size,
+    len(train_df),
+    len(eval_df)))
+# -
+
+# ### Vectorizer
+
+# + tags=[]
+class TwitterDataset(torch.utils.data.Dataset):
+    def __init__(self, train_dataset, eval_dataset, test_dataset):
+        self.train_dataset = train_dataset
+        self.eval_dataset = eval_dataset
+        self.test_dataset = test_dataset
+        self.current_dataset = self.train_dataset
+        self.spacy_tokenizer = spacy.load('en_core_web_sm', disable=['ner', 'parser'])
+
+        self.st_voc = []
+        self.max_seq_len = 0
+        self.__init_sentiment_vocab()
+
+        self.voc = []
+        self.__init_vocab()
+
+
+    def __init_sentiment_vocab(self):
+        self.st_voc = ['UNK', *self.train_dataset['sentiment'].unique()]
+
+    def __init_vocab(self):
+        self.voc = ['UNK', 'SOS', 'EOS', 'MASK']
+        for feat in self.train_dataset['text']:
+            tokens = [t.lemma_ for t in self.spacy_tokenizer(feat.strip())]
+            self.voc = [*self.voc, *tokens]
+            self.voc = list(set(self.voc))
+            self.max_seq_len = len(tokens) if len(tokens) > self.max_seq_len else self.max_seq_len
+        self.max_seq_len += 2
+
+    def __getitem__(self, index):
+        return {
+            "text_v" : self.vectorize(self.current_dataset[index]["text"]),
+            "sentiment_i" : self.get_sentiment_i(self.current_dataset[index]["sentiments"])
+        }
+
+    def __len__(self):
+        return len(self.current_dataset)
+
+    def switch_to_dataset(self,flag):
+        if flag == 'train':
+            self.current_dataset = self.train_dataset
+        elif flag == 'eval':
+            self.current_dataset = self.eval_dataset
+        elif flag == 'test':
+            self.current_dataset = self.test_dataset
+        else:
+            raise ValueError("this dataset doesn't exist !")
+
+    def vectorize(self, tokens):
+        vector = [self.voc.index(t.lemma_) for t in self.spacy_tokenizer(tokens.strip())]
+        vector.insert(0, self.voc.index('SOS'))
+        vector.append(self.voc.index('EOS'))
+        while len(vector) < self.max_seq_len :
+            vector.append(self.voc.index('MASK'))
+        return vector
+
+    def get_sentiment_i(self, st_token):
+        return  self.st_voc.index(st_token) if st_token in self.st_voc else self.st_voc.index('UNK')
+# -
+
 
 # ## Pre-Training & Fine-Tuning
 
