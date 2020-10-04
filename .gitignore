@@ -156,3 +156,4 @@ cython_debug/
 input/
 test/
 src/*.ipynb
+settings.json
