@@ -216,10 +216,12 @@ class TwitterDataset(torch.utils.data.Dataset):
         self.spacy_tokenizer = spacy.load('en_core_web_sm', disable=['ner', 'parser'])
 
         self.st_voc = []
-        self.max_seq_len = 0
-        self.__init_sentiment_vocab()
+        self.vocabulary = {
+            'tokens': [],
+            'max_seq_len' : 0
+        }
 
-        self.voc = []
+        self.__init_sentiment_vocab()
         self.__init_vocab()
 
 
@@ -227,13 +229,16 @@ class TwitterDataset(torch.utils.data.Dataset):
         self.st_voc = ['UNK', *self.train_dataset['sentiment'].unique()]
 
     def __init_vocab(self):
-        self.voc = ['UNK', 'SOS', 'EOS', 'MASK']
+        voc_tokens = ['UNK', 'SOS', 'EOS', 'MASK']
+        max_seq_len = 0
         for feat in self.train_dataset['text']:
             tokens = [t.lemma_ for t in self.spacy_tokenizer(feat.strip())]
-            self.voc = [*self.voc, *tokens]
-            self.voc = list(set(self.voc))
-            self.max_seq_len = len(tokens) if len(tokens) > self.max_seq_len else self.max_seq_len
-        self.max_seq_len += 2
+            voc_tokens = [*voc_tokens, *tokens]
+            voc_tokens = list(set(voc_tokens))
+            max_seq_len = len(tokens) if len(tokens) > max_seq_len else max_seq_len
+        self.vocabulary['max_seq_len'] =  max_seq_len + 2
+        self.vocabulary['tokens'] = voc_tokens
+
 
     def __getitem__(self, index):
         return {
@@ -255,11 +260,12 @@ class TwitterDataset(torch.utils.data.Dataset):
             raise ValueError("this dataset doesn't exist !")
 
     def vectorize(self, tokens):
-        vector = [self.voc.index(t.lemma_) for t in self.spacy_tokenizer(tokens.strip())]
-        vector.insert(0, self.voc.index('SOS'))
-        vector.append(self.voc.index('EOS'))
-        while len(vector) < self.max_seq_len :
-            vector.append(self.voc.index('MASK'))
+        voc = self.vocabulary['tokens']
+        vector = [voc.index(t.lemma_) for t in self.spacy_tokenizer(tokens.strip())]
+        vector.insert(0, voc.index('SOS'))
+        vector.append(voc.index('EOS'))
+        while len(vector) < self.vocabulary['max_seq_len'] :
+            vector.append(voc.index('MASK'))
         return vector
 
     def get_sentiment_i(self, st_token):

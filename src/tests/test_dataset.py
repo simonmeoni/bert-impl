@@ -38,13 +38,14 @@ def test___init_vocab():
     err = "these vocabulary must be equals"
     expected_voc = [ 'UNK', 'SOS', 'EOS', 'MASK', '-PRON-', 'boss', 'be', 'bully',
                         '...', 'what', 'interview', '!', 'leave', 'alone']
-    assert sorted(dataset___init_vocab.voc) == sorted(expected_voc), err
-    assert dataset___init_vocab.max_seq_len == 8
+    assert sorted(dataset___init_vocab.vocabulary['tokens']) == sorted(expected_voc), err
+    assert dataset___init_vocab.vocabulary['max_seq_len'] == 8
 
 def test_vectorize():
     dataset_vectorize = TwitterDataset(df.iloc[0:0], [], [])
-    dataset_vectorize.voc = ['of', 'SOS', 'MASK', 'high', 'both', 'EOS', 'sooo', '-PRON-', 'UNK']
-    dataset_vectorize.max_seq_len = 5
+    dataset_vectorize.vocabulary['tokens'] = ['of', 'SOS', 'MASK', 'high',
+                                                'both', 'EOS', 'sooo', '-PRON-', 'UNK']
+    dataset_vectorize.vocabulary['max_seq_len'] = 5
 
     err = "these vectors must be equals"
 
