@@ -41,7 +41,7 @@ import spacy
 import pandas as pd
 from torch import nn
 from torch.nn.parameter import Parameter
-
+from torch.nn import functional as F
 
 # -
 
@@ -65,10 +65,10 @@ class Bert(nn.Module):
 
     def forward(self, tokens):
         cat_tokens = torch.cat(self.emb(tokens), self.pos_enc)
-        representation = self.encoderLayer[0](cat_tokens)
+        z_n = self.encoderLayer[0](cat_tokens)
         for encoder in self.encoderLayer:
-            representation = encoder(representation)
-        return representation
+            z_n = encoder(z_n)
+        return z_n
 
 
 # -
@@ -91,9 +91,11 @@ class Encoder(nn.Module):
         self.feed_forward_network = nn.Linear(hidden_size, dim_w_matrices)
         self.add_norm_l2 = AddNormalizeLayer(dim_w_matrices)
 
-    def forward(self, embeddings):
-        representations = self.mh_att(embeddings)
-        return self.ffnn(representations)
+    def forward(self, x_n):
+        z_n = self.mh_att(x_n)
+        l1_out =  self.add_norm_l1(x_n, z_n)
+        ffn_out = self.feed_forward_network(l1_out)
+        return self.add_norm_l2(ffn_out)
 
 # -
 
@@ -104,22 +106,25 @@ class Encoder(nn.Module):
 
 
 def init_weights(x_n, y_n):
-    return nn.init.xavier_uniform(torch.empty(x_n, y_n))
+    return nn.init.xavier_uniform_(torch.empty(x_n, y_n))
 
 
 class MultiHeadAttention(nn.Module):
     def __init__(self, multi_head_size, tokens_size, dim_w_matrices):
         super().__init__()
-        self.w_o = Parameter(init_weights(dim_w_matrices, tokens_size))
+        self.tokens_size = tokens_size
+        self.dim_w_matrices = dim_w_matrices
+        self.w_o = Parameter(init_weights(tokens_size, dim_w_matrices * multi_head_size))
         self.att_heads = nn.ModuleList()
         for _ in range(multi_head_size):
             self.att_heads.append(Attention(tokens_size,dim_w_matrices))
 
     def forward(self, tokens):
         z_n = []
+        batch_size = tokens.shape[0]
         for head in self.att_heads:
-            z_n.append(head(tokens))
-        return torch.cat(z_n) * self.w_o
+            z_n.append(head(tokens).view(self.dim_w_matrices,-1))
+        return self.w_o.mm(torch.cat(z_n)).view(batch_size, -1, self.tokens_size)
 
 
 class Attention(nn.Module):
@@ -133,10 +138,13 @@ class Attention(nn.Module):
         self.w_vector = Parameter(init_weights(self.tokens_size, self.dim_w_matrices))
 
     def forward(self, tokens):
-        query = self.w_query * tokens
-        key = self.w_key * tokens
-        value = self.w_vector * tokens
-        return nn.Softmax((query * key.t()) / math.sqrt(self.dim_w_matrices) * value)
+        batch_size = tokens.shape[0]
+        no_batch_tokens = tokens.view(-1, self.tokens_size)
+        query = no_batch_tokens.mm(self.w_query)
+        key = no_batch_tokens.mm(self.w_query)
+        value = no_batch_tokens.mm(self.w_query)
+        current_z = F.softmax((query.mm(key.t())) / math.sqrt(self.dim_w_matrices)).mm(value)
+        return current_z.view(batch_size,-1, self.dim_w_matrices)
 
 
 # -
