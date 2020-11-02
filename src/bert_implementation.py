@@ -51,6 +51,7 @@ from torch.nn import functional as F
 
 # + pycharm={"name": "#%%\n"}
 class Bert(nn.Module):
+    # pylint: disable=too-many-arguments
     def __init__(self, stack_size, embedding_dim, num_embeddings, dim_w_matrices, mh_size):
         super().__init__()
         self.emb = nn.Embedding(
