@@ -1,6 +1,5 @@
 import pandas as pd
-import torch
-from src.bert_implementation import Attention, MultiHeadAttention, TwitterDataset
+from src.bert_implementation import TwitterDataset
 
 df = pd.read_csv('src/tests/resources/test_data.csv')
 dataset = TwitterDataset(df.iloc[:4], df.iloc[4:6], df.iloc[6:9])
@@ -60,18 +59,3 @@ def test_vectorize():
     assert len(observed_v_1) == len(observed_v_2)
     assert expected_v_1 == observed_v_1, err
     assert expected_v_2 == observed_v_2, err
-
-def test__get_item__():
-    pass
-
-def test_attention():
-    err = "the size must be equal to this set"
-    att = Attention(4,3)
-    test_tensor = torch.rand(3,2,4)
-    assert att(test_tensor).shape == (3,2,3), err
-
-def test_multi_head_attention():
-    err = "the size must be equal to this set"
-    att = MultiHeadAttention(8,4,3)
-    test_tensor = torch.rand(3,2,4)
-    assert att(test_tensor).shape == (3,2,4), err

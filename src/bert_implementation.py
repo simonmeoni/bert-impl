@@ -33,7 +33,6 @@
 # ### Requirements
 
 # + pycharm={"name": "#%%\n"}
-import copy
 import math
 import torch
 import spacy
@@ -52,24 +51,23 @@ from torch.nn import functional as F
 
 # + pycharm={"name": "#%%\n"}
 class Bert(nn.Module):
-    def __init__(self, stack_size, embedding_dim, num_embeddings, encoder):
+    # pylint: disable=too-many-arguments
+    def __init__(self, stack_size, embedding_dim, num_embeddings, dim_w_matrices, mh_size):
         super().__init__()
         self.emb = nn.Embedding(
             embedding_dim=embedding_dim,
             num_embeddings=num_embeddings
         )
         self.encoder_layer = nn.ModuleList()
-        self.pos_enc = PositionalEncoding(embedding_dim)
         for _ in range(stack_size):
-            self.encoderLayer.append(copy.deepcopy(encoder))
+            self.encoder_layer.append(Encoder(dim_w_matrices, mh_size, embedding_dim))
 
     def forward(self, tokens):
-        cat_tokens = torch.cat(self.emb(tokens), self.pos_enc)
-        z_n = self.encoderLayer[0](cat_tokens)
-        for encoder in self.encoderLayer:
+        pos_embedding = positional_enc(tokens.shape[1], tokens.shape[2])
+        z_n = self.encoder_layer[0](pos_embedding + tokens)
+        for encoder in self.encoder_layer:
             z_n = encoder(z_n)
         return z_n
-
 
 # -
 
@@ -84,18 +82,18 @@ class Bert(nn.Module):
 
 # + pycharm={"name": "#%%\n"}
 class Encoder(nn.Module):
-    def __init__(self, hidden_size, dim_w_matrices, multi_head_size, tokens_size):
+    def __init__(self, dim_w_matrices, mh_size, tokens_size):
         super().__init__()
-        self.mh_att = MultiHeadAttention(multi_head_size, tokens_size, dim_w_matrices)
-        self.add_norm_l1 = AddNormalizeLayer(dim_w_matrices)
-        self.feed_forward_network = nn.Linear(hidden_size, dim_w_matrices)
-        self.add_norm_l2 = AddNormalizeLayer(dim_w_matrices)
+        self.mh_att = MultiHeadAttention(mh_size, tokens_size, dim_w_matrices)
+        self.add_norm_l1 = AddNormalizeLayer(tokens_size)
+        self.feed_forward_network = nn.Linear(tokens_size, tokens_size)
+        self.add_norm_l2 = AddNormalizeLayer(tokens_size)
 
     def forward(self, x_n):
         z_n = self.mh_att(x_n)
         l1_out =  self.add_norm_l1(x_n, z_n)
         ffn_out = self.feed_forward_network(l1_out)
-        return self.add_norm_l2(ffn_out)
+        return self.add_norm_l2(l1_out, ffn_out)
 
 # -
 
@@ -158,22 +156,25 @@ class AddNormalizeLayer(nn.Module):
         super().__init__()
         self.layer_norm = nn.LayerNorm(normalized_shape)
 
-    def forward(self, x_n, z_n):
-        cat = torch.cat(x_n, z_n)
-        return self.layer_norm(cat)
+    def forward(self, residual_in, prev_res):
+        xz_sum = residual_in + prev_res
+        return self.layer_norm(xz_sum)
 # -
 
 # ### Positional Encoding
 
 # + pycharm={"name": "#%%\n"}
 
-class PositionalEncoding(nn.Module):
-    def __init__(self, model_dim):
-        super().__init__()
-        self.model_dim = model_dim
-
-    def forward(self, pos):
-        return torch.sin(pos/1000^(2/self.model_dim))
+def positional_enc(seq_len, model_dim):
+    pos_emb_vector = torch.empty(seq_len, model_dim)
+    for pos in range(seq_len):
+        for i_col in range(model_dim):
+            power_ind = 10000^(int((2*i_col)/model_dim))
+            if i_col % 2 == 0:
+                pos_emb_vector[pos, i_col] = math.sin(pos/power_ind)
+            else:
+                pos_emb_vector[pos, i_col] = math.cos(pos/power_ind)
+    return pos_emb_vector
 
 
 # -
