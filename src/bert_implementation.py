@@ -227,9 +227,9 @@ class TwitterDataset(torch.utils.data.Dataset):
         self.st_voc = []
         self.vocabulary = {
             'tokens': [],
-            'max_seq_len' : 0
+            'max_seq_len' : 0,
+            'len_voc': len(self.vocabulary['tokens'])
         }
-        self.len_vocabulary = len(self.vocabulary['tokens'])
         self.__init_sentiment_vocab()
         self.__init_vocab()
 
@@ -291,7 +291,7 @@ twitter_dataset = TwitterDataset(train_dt, eval_dt, test_dt)
 parameters = {
         "stack_size": 8,
         "embedding_dim": 128,
-        "vocabulary_size": twitter_dataset.len_vocabulary,
+        "vocabulary_size": twitter_dataset.vocabulary['len_voc'],
         "bert_weight_matrices": 256,
         "multi_head_size": 8,
         "learning_rate": 0.0001,
