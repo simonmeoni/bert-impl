@@ -1,5 +1,6 @@
 import pandas as pd
-from src.bert_implementation import TwitterDataset
+import torch
+from src.bert_implementation import TwitterDataset, generate_batches
 
 df = pd.read_csv('src/tests/resources/test_data.csv')
 dataset = TwitterDataset(df.iloc[:4], df.iloc[4:6], df.iloc[6:9])
@@ -50,12 +51,16 @@ def test_vectorize():
     err = "these vectors must be equals"
 
     # vector : ['SOS', 'sooo', 'high', 'EOS', 'MASK']
-    expected_v_1 = [1, 6, 3, 5, 2]
+    expected_v_1 = torch.Tensor([1, 6, 3, 5, 2])
     # vector : ['SOS', 'both', 'of', 'you', 'EOS']
-    expected_v_2 = [1, 4, 0, 7, 5]
+    expected_v_2 = torch.Tensor([1, 4, 0, 7, 5])
     observed_v_1 = dataset_vectorize.vectorize("Sooo high")
     observed_v_2 = dataset_vectorize.vectorize("Both of you")
 
     assert len(observed_v_1) == len(observed_v_2)
-    assert expected_v_1 == observed_v_1, err
-    assert expected_v_2 == observed_v_2, err
+    assert expected_v_1.allclose(observed_v_1), err
+    assert expected_v_2.allclose(observed_v_2), err
+
+def test_generate_batches():
+    test_dataset = TwitterDataset(df.iloc[2:5], [], [])
+    assert next(generate_batches(test_dataset, 2))

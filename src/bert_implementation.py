@@ -41,7 +41,7 @@ import pandas as pd
 from torch import nn
 from torch.nn.parameter import Parameter
 from torch.nn import functional as F
-
+from torch.utils.data import Dataset, DataLoader
 # -
 
 # ### Bert Encoder Stacks
@@ -183,8 +183,8 @@ def positional_enc(seq_len, model_dim):
 
 # ### import csv
 
-train_csv = pd.read_csv('./input/tweet-sentiment-extraction/train.csv')
-test_dt =  pd.read_csv('./input/tweet-sentiment-extraction/test.csv')
+train_csv = pd.read_csv('./input/tweet-sentiment-extraction/train.csv')[:20]
+test_dt =  pd.read_csv('./input/tweet-sentiment-extraction/test.csv')[:20]
 train_csv.head()
 
 # ### split & create training, evaluation & test datasets
@@ -216,7 +216,7 @@ size of test datset : {2}
 # ### Vectorizer
 
 # + tags=[]
-class TwitterDataset(torch.utils.data.Dataset):
+class TwitterDataset(Dataset):
     def __init__(self, train_dataset, eval_dataset, test_dataset):
         self.train_dataset = train_dataset
         self.eval_dataset = eval_dataset
@@ -228,7 +228,7 @@ class TwitterDataset(torch.utils.data.Dataset):
         self.vocabulary = {
             'tokens': [],
             'max_seq_len' : 0,
-            'len_voc': len(self.vocabulary['tokens'])
+            'len_voc': 0
         }
         self.__init_sentiment_vocab()
         self.__init_vocab()
@@ -241,18 +241,20 @@ class TwitterDataset(torch.utils.data.Dataset):
         voc_tokens = ['UNK', 'SOS', 'EOS', 'MASK']
         max_seq_len = 0
         for feat in self.train_dataset['text']:
-            tokens = [t.lemma_ for t in self.spacy_tokenizer(feat.strip())]
-            voc_tokens = [*voc_tokens, *tokens]
-            voc_tokens = list(set(voc_tokens))
-            max_seq_len = len(tokens) if len(tokens) > max_seq_len else max_seq_len
+            if not isinstance(feat, float):
+                tokens = [t.lemma_ for t in self.spacy_tokenizer(feat.strip())]
+                voc_tokens = [*voc_tokens, *tokens]
+                voc_tokens = list(set(voc_tokens))
+                max_seq_len = len(tokens) if len(tokens) > max_seq_len else max_seq_len
         self.vocabulary['max_seq_len'] =  max_seq_len + 2
         self.vocabulary['tokens'] = voc_tokens
+        self.vocabulary['len_voc'] = len(self.vocabulary['tokens'])
 
 
     def __getitem__(self, index):
         return {
-            "text_v" : self.vectorize(self.current_dataset[index]["text"]),
-            "sentiment_i" : self.get_sentiment_i(self.current_dataset[index]["sentiments"])
+            "text_v" : self.vectorize(self.current_dataset.iloc[index]["text"]),
+            "sentiment_i" : self.get_sentiment_i(self.current_dataset.iloc[index]["sentiment"])
         }
 
     def __len__(self):
@@ -275,7 +277,7 @@ class TwitterDataset(torch.utils.data.Dataset):
         vector.append(voc.index('EOS'))
         while len(vector) < self.vocabulary['max_seq_len'] :
             vector.append(voc.index('MASK'))
-        return vector
+        return torch.Tensor(vector)
 
     def get_sentiment_i(self, st_token):
         return  self.st_voc.index(st_token) if st_token in self.st_voc else self.st_voc.index('UNK')
@@ -309,6 +311,20 @@ bert = Bert(
     dim_w_matrices=parameters["bert_weight_matrices"],
     mh_size=parameters["multi_head_size"]
     )
+
+def generate_batches(dataset, batch_size, shuffle=True, drop_last=True, device="cpu"):
+    """
+    A generator function which wraps the PyTorch DataLoader. It will
+    ensure each tensor is on the write device location.
+    """
+    data_loader = DataLoader(dataset=dataset, batch_size=batch_size,
+                                shuffle=shuffle, drop_last=drop_last)
+
+    for data_dict in data_loader:
+        data = {}
+        for name, _ in data_dict.items():
+            data[name] = data_dict[name].to(device)
+        yield data
 # -
 
 
