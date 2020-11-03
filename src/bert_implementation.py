@@ -183,8 +183,8 @@ def positional_enc(seq_len, model_dim):
 
 # ### import csv
 
-train_csv = pd.read_csv('./input/tweet-sentiment-extraction/train.csv')[:200]
-test_dt =  pd.read_csv('./input/tweet-sentiment-extraction/test.csv')[:200]
+train_csv = pd.read_csv('./input/tweet-sentiment-extraction/train.csv')
+test_dt =  pd.read_csv('./input/tweet-sentiment-extraction/test.csv')
 train_csv.head()
 
 # ### split & create training, evaluation & test datasets
@@ -241,8 +241,7 @@ class TwitterDataset(Dataset):
         voc_tokens = ['UNK', 'SOS', 'EOS', 'MASK']
         max_seq_len = 0
         for feat in self.train_dataset['text']:
-            print(feat)
-            if type(feat) != float:
+            if not isinstance(feat, float):
                 tokens = [t.lemma_ for t in self.spacy_tokenizer(feat.strip())]
                 voc_tokens = [*voc_tokens, *tokens]
                 voc_tokens = list(set(voc_tokens))
