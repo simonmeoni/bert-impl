@@ -183,8 +183,8 @@ def positional_enc(seq_len, model_dim):
 
 # ### import csv
 
-train_csv = pd.read_csv('./input/tweet-sentiment-extraction/train.csv')
-test_dt =  pd.read_csv('./input/tweet-sentiment-extraction/test.csv')
+train_csv = pd.read_csv('./input/tweet-sentiment-extraction/train.csv')[:20]
+test_dt =  pd.read_csv('./input/tweet-sentiment-extraction/test.csv')[:20]
 train_csv.head()
 
 # ### split & create training, evaluation & test datasets
