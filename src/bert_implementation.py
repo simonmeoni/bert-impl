@@ -184,18 +184,18 @@ def positional_enc(seq_len, model_dim):
 # ### import csv
 
 train_csv = pd.read_csv('./input/tweet-sentiment-extraction/train.csv')
-test_df =  pd.read_csv('./input/tweet-sentiment-extraction/test.csv')
+test_dt =  pd.read_csv('./input/tweet-sentiment-extraction/test.csv')
 train_csv.head()
 
 # ### split & create training, evaluation & test datasets
 
 # + tags=[]
 len_train_csv = len(train_csv)
-len_test_df = len(test_df)
+len_test_df = len(test_dt)
 total_size = len_train_csv + len_test_df
 
-train_df = train_csv.iloc[:int(len_train_csv*70/100)]
-eval_df = train_csv.iloc[int(len_train_csv*70/100):]
+train_dt = train_csv.iloc[:int(len_train_csv*70/100)]
+eval_dt = train_csv.iloc[int(len_train_csv*70/100):]
 
 print(
 """size of train.csv file : {0}
@@ -209,8 +209,8 @@ size of test datset : {2}
     len_train_csv,
     len_test_df,
     total_size,
-    len(train_df),
-    len(eval_df)))
+    len(train_dt),
+    len(eval_dt)))
 # -
 
 # ### Vectorizer
@@ -229,7 +229,7 @@ class TwitterDataset(torch.utils.data.Dataset):
             'tokens': [],
             'max_seq_len' : 0
         }
-
+        self.len_vocabulary = len(self.vocabulary['tokens'])
         self.__init_sentiment_vocab()
         self.__init_vocab()
 
@@ -281,12 +281,41 @@ class TwitterDataset(torch.utils.data.Dataset):
         return  self.st_voc.index(st_token) if st_token in self.st_voc else self.st_voc.index('UNK')
 # -
 
+# ### Dataset Instanciation
+twitter_dataset = TwitterDataset(train_dt, eval_dt, test_dt)
+# -
+
+# ## Parameters
+
+# + pycharm={"name": "#%%\n"}
+parameters = {
+        "stack_size": 8,
+        "embedding_dim": 128,
+        "vocabulary_size": twitter_dataset.len_vocabulary,
+        "bert_weight_matrices": 256,
+        "multi_head_size": 8,
+        "learning_rate": 0.0001,
+        "batch_size": 128,
+        "epochs": 100,
+        "device": "cpu"
+    }
+# -
+
+# ## Model Instanciation and DataLoader
+bert = Bert(
+    stack_size=parameters["stack_size"],
+    embedding_dim=parameters["embedding_dim"],
+    num_embeddings=parameters["vocabulary_size"],
+    dim_w_matrices=parameters["bert_weight_matrices"],
+    mh_size=parameters["multi_head_size"]
+    )
+# -
+
 
 # ## Pre-Training & Fine-Tuning
 
 # ### Task #1 : Masked LM
-#
-#
+
 
 # ### Task #2 : Next sentence Prediction
 
