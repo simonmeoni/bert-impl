@@ -7,16 +7,17 @@ dataset = TwitterDataset(df.iloc[:4], df.iloc[4:6], df.iloc[6:9])
 expected_sentiment_list = ['UNK', 'negative', 'neutral']
 
 def test_switch_dataset():
+    err = "the two int must have the same value"
     # test len of the train dataset
-    assert len(dataset) == 4
+    assert len(dataset) == 4, err
 
     # test len of the eval dataset
     dataset.switch_to_dataset('eval')
-    assert len(dataset) == 2
+    assert len(dataset) == 2, err
 
     # test len of the test dataset
     dataset.switch_to_dataset('test')
-    assert len(dataset) == 3
+    assert len(dataset) == 3, err
 
     # test len of the test dataset
     try:
