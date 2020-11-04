@@ -31,8 +31,9 @@
 # ![architecture](https://tinyurl.com/y5ck5j7c)
 
 # ### Requirements
-
+# Don't forget to set the environment variable `CORPUS_SIZE` to set the size of corpus if it needed
 # + pycharm={"name": "#%%\n"}
+import os
 import math
 import torch
 import spacy
@@ -42,6 +43,7 @@ from torch import nn
 from torch.nn.parameter import Parameter
 from torch.nn import functional as F
 from torch.utils.data import Dataset, DataLoader
+
 # -
 
 # ### Bert Encoder Stacks
@@ -183,8 +185,17 @@ def positional_enc(seq_len, model_dim):
 
 # ### import csv
 
-train_csv = pd.read_csv('./input/tweet-sentiment-extraction/train.csv')[:20]
-test_dt =  pd.read_csv('./input/tweet-sentiment-extraction/test.csv')[:20]
+TRAIN_PATH = './input/tweet-sentiment-extraction/train.csv'
+TEST_PATH = './input/tweet-sentiment-extraction/test.csv'
+
+if  "CORPUS_SIZE" not in os.environ:
+    train_csv = pd.read_csv(TRAIN_PATH)
+    test_dt =  pd.read_csv(TEST_PATH)
+else:
+    corpus_size = int(os.environ.get("CORPUS_SIZE"))
+    train_csv = pd.read_csv(TRAIN_PATH)[:corpus_size]
+    test_dt =  pd.read_csv(TEST_PATH)[:corpus_size]
+
 train_csv.head()
 
 # ### split & create training, evaluation & test datasets
@@ -299,7 +310,9 @@ parameters = {
         "learning_rate": 0.0001,
         "batch_size": 128,
         "epochs": 100,
-        "device": "cpu"
+        "device": "cpu",
+        "corpus test size": len(test_dt),
+        "corpus train size": len(train_csv),
     }
 # -
 
