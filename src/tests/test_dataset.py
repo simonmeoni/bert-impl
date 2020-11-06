@@ -36,7 +36,7 @@ def test_get_sentiment_i():
     assert dataset.get_sentiment_i('negative1') == 0
 
 def test___init_vocab():
-    dataset___init_vocab = TwitterDataset(df.iloc[2:4], [], [])
+    dataset___init_vocab = TwitterDataset(df.iloc[2:4], df.iloc[2:4], df.iloc[2:4])
     err = "these vocabulary must be equals"
     expected_voc = [ 'UNK', 'SOS', 'EOS', 'MASK', '-PRON-', 'boss', 'be', 'bully',
                         '...', 'what', 'interview', '!', 'leave', 'alone']
@@ -44,7 +44,7 @@ def test___init_vocab():
     assert dataset___init_vocab.vocabulary['max_seq_len'] == 8
 
 def test_vectorize():
-    dataset_vectorize = TwitterDataset(df.iloc[0:0], [], [])
+    dataset_vectorize = TwitterDataset(df.iloc[0:0], df.iloc[0:0], df.iloc[0:0])
     dataset_vectorize.vocabulary['tokens'] = ['of', 'SOS', 'MASK', 'high',
                                                 'both', 'EOS', 'sooo', '-PRON-', 'UNK']
     dataset_vectorize.vocabulary['max_seq_len'] = 5
@@ -52,16 +52,27 @@ def test_vectorize():
     err = "these vectors must be equals"
 
     # vector : ['SOS', 'sooo', 'high', 'EOS', 'MASK']
-    expected_v_1 = torch.Tensor([1, 6, 3, 5, 2])
+    expected_v_1 = torch.LongTensor([1, 6, 3, 5, 2])
     # vector : ['SOS', 'both', 'of', 'you', 'EOS']
-    expected_v_2 = torch.Tensor([1, 4, 0, 7, 5])
+    expected_v_2 = torch.LongTensor([1, 4, 0, 7, 5])
+    # vector : ['SOS', 'UNK', 'UNK', 'UNK', 'EOS']
+    expected_v_3 = torch.LongTensor([1, 8, 8, 8, 5])
     observed_v_1 = dataset_vectorize.vectorize("Sooo high")
     observed_v_2 = dataset_vectorize.vectorize("Both of you")
+    observed_v_3 = dataset_vectorize.vectorize("Cheese Fromage Renard")
 
     assert len(observed_v_1) == len(observed_v_2)
     assert expected_v_1.allclose(observed_v_1), err
     assert expected_v_2.allclose(observed_v_2), err
+    assert expected_v_3.allclose(observed_v_3), err
 
 def test_generate_batches():
-    test_dataset = TwitterDataset(df.iloc[2:5], [], [])
+    test_dataset = TwitterDataset(df.iloc[0:10], df.iloc[0:10], df.iloc[0:10])
     assert next(generate_batches(test_dataset, 2))
+
+def test_get_tokens():
+    err = "these two lists must contains the same tokens"
+    t_dataset = TwitterDataset(df.iloc[7:8], df.iloc[7:8], df.iloc[7:8])
+    expected =  ['SOS', 'soooo', 'high', 'EOS']
+    observed = t_dataset.get_tokens(t_dataset[0]['vectorized_tokens'])
+    assert expected == observed, err

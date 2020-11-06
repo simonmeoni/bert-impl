@@ -39,12 +39,15 @@ def test_encoder():
 
 def test_bert():
     err = "the size must be equal to this set"
-    test_tensor = torch.rand(3,2,4)
+    test_tensor = torch.LongTensor([
+        [0,1,4],
+        [3,2,1]
+    ])
     bert = Bert(
-        stack_size=2,
+        stack_size=6,
         embedding_dim=4,
-        num_embeddings=4,
-        dim_w_matrices=3,
-        mh_size=6
+        num_embeddings=5,
+        dim_w_matrices=6,
+        mh_size=5
         )
-    assert bert(test_tensor).shape == (3,2,4), err
+    assert bert(test_tensor).shape == (2,3,4), err
