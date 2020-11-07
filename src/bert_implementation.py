@@ -35,6 +35,7 @@
 # **Note**: Don't forget to set the environment variable `CORPUS_SIZE`
 # to set the size of corpus if it needed
 # + pycharm={"name": "#%%\n"}
+
 import os
 import random
 import math
@@ -42,12 +43,15 @@ import spacy
 import numpy
 import pandas as pd
 
+import neptune
 import torch
 import torch.optim as optim
 from torch import nn
 from torch.nn.parameter import Parameter
 from torch.nn import functional as f
 from torch.utils.data import Dataset, DataLoader
+
+NEPTUNE_API_TOKEN = os.environ.get("NEPTUNE_API_TOKEN")
 
 CLS = 'CLS'
 MASK = 'MASK'
@@ -226,9 +230,9 @@ print(
 size of test.csv file : {1}
 total size : {2}
 
-size of train datset : {3}
-size of eval datset : {4}
-size of test datset : {2}
+size of train dataset : {3}
+size of eval dataset : {4}
+size of test dataset : {2}
 """.format(
         len_train_csv,
         len_test_df,
@@ -269,7 +273,7 @@ class TwitterDataset(Dataset):
                 tokens, max_seq_len = self.extract_tokens(feat, max_seq_len)
                 voc_tokens = [*voc_tokens, *tokens]
                 voc_tokens = list(set(voc_tokens))
-        for feat in pd.concat([self.eval_dataset['text'], self.train_dataset['text']]):
+        for feat in pd.concat([self.eval_dataset['text'], self.test_dataset['text']]):
             if not isinstance(feat, float):
                 _, max_seq_len = self.extract_tokens(feat, max_seq_len)
 
@@ -333,9 +337,9 @@ twitter_dataset = TwitterDataset(train_dt, eval_dt, test_dt)
 # + pycharm={"name": "#%%\n"}
 parameters = {
     "stack_size": 8,
-    "embedding_dim": 12,
+    "embedding_dim": 32,
     "vocabulary_size": twitter_dataset.vocabulary['len_voc'],
-    "bert_weight_matrices": 12,
+    "bert_weight_matrices": 32,
     "multi_head_size": 8,
     "learning_rate": 0.0001,
     "batch_size": 5,
@@ -457,6 +461,8 @@ class PreTrainingClassifier(nn.Module):
 classifier = PreTrainingClassifier(parameters['embedding_dim'], parameters['vocabulary_size'])
 
 # + pycharm={"name": "#%%\n"}
+neptune.init('smeoni/bert-impl', api_token=NEPTUNE_API_TOKEN)
+neptune.create_experiment(name='bert-impl-experiment', params=parameters)
 for epoch in range(parameters['epochs']):
     # train loop
     twitter_dataset.switch_to_dataset("train")
@@ -475,6 +481,12 @@ for epoch in range(parameters['epochs']):
         loss.backward()
         # Step 5: Trigger the optimizer to perform one update
         optimizer.step()
+        neptune.log_metric('train loss', loss.item())
+        neptune.send_text('train text expected', ' '.join(
+            twitter_dataset.get_tokens(torch.argmax(y_pred, dim=2)[-1]))
+        )
+        neptune.send_text('train text observed', ' '.join(twitter_dataset.get_tokens(y_target[-1])))
+
     twitter_dataset.switch_to_dataset("eval")
     # evaluation loop
     for batch in generate_batches(twitter_dataset, parameters['batch_size'],
@@ -486,6 +498,7 @@ for epoch in range(parameters['epochs']):
         y_pred = classifier(bert_zn)
         # Step 2: Compute the loss value that we wish to optimize
         loss = ce_loss(y_pred.reshape(-1, y_pred.shape[2]), y_target.reshape(-1))
+        neptune.log_metric('eval loss', loss.item())
 
 # + [markdown] pycharm={"name": "#%% md\n"}
 # ### Test Loop
@@ -501,6 +514,7 @@ for batch in generate_batches(twitter_dataset, parameters['batch_size'],
     y_pred = classifier(bert_zn)
     # Step 2: Compute the loss value that we wish to optimize
     loss = ce_loss(y_pred.reshape(-1, y_pred.shape[2]), y_target.reshape(-1))
+    neptune.log_metric('test loss', loss.item())
 
 # + [markdown] pycharm={"name": "#%% md\n"}
 # ## Experimentation
