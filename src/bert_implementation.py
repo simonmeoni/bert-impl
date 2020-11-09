@@ -486,10 +486,10 @@ for epoch in range(parameters['epochs']):
         # Step 5: Trigger the optimizer to perform one update
         optimizer.step()
         neptune.log_metric('train loss', loss.item())
-        neptune.send_text('train text expected', ' '.join(
+        neptune.send_text('train text observed', ' '.join(
             twitter_dataset.get_tokens(torch.argmax(y_pred, dim=2)[-1]))
         )
-        neptune.send_text('train text observed', ' '.join(twitter_dataset.get_tokens(y_target[-1])))
+        neptune.send_text('train text expected', ' '.join(twitter_dataset.get_tokens(y_target[-1])))
 
     twitter_dataset.switch_to_dataset("eval")
     # evaluation loop
@@ -519,6 +519,6 @@ for batch in generate_batches(twitter_dataset, parameters['batch_size'],
     # Step 2: Compute the loss value that we wish to optimize
     loss = ce_loss(y_pred.reshape(-1, y_pred.shape[2]), y_target.reshape(-1))
     neptune.log_metric('test loss', loss.item())
-
+neptune.stop()
 # + [markdown] pycharm={"name": "#%% md\n"}
 # ## Experimentation
