@@ -30,7 +30,7 @@
 #
 # ![architecture](https://tinyurl.com/y5ck5j7c)
 
-# +
+# + [markdown] pycharm={"name": "#%% md\n"}
 # ### Requirements
 # **Note**: Don't forget to set the environment variable `CORPUS_SIZE`
 # to set the size of corpus if it needed
@@ -52,6 +52,7 @@ from torch.nn import functional as f
 from torch.utils.data import Dataset, DataLoader
 
 NEPTUNE_API_TOKEN = os.environ.get("NEPTUNE_API_TOKEN")
+
 
 CLS = 'CLS'
 MASK = 'MASK'
@@ -203,15 +204,17 @@ def positional_enc(seq_len, model_dim):
 # ### import csv
 
 # + pycharm={"name": "#%%\n"}
-TRAIN_PATH = './input/tweet-sentiment-extraction/train.csv'
-TEST_PATH = './input/tweet-sentiment-extraction/test.csv'
+TRAIN_PATH = '../input/tweet-sentiment-extraction/train.csv'
+TEST_PATH = '../input/tweet-sentiment-extraction/test.csv'
 if "CORPUS_SIZE" not in os.environ:
-    train_csv = pd.read_csv(TRAIN_PATH)
-    test_dt = pd.read_csv(TEST_PATH)
+    train_csv = pd.read_csv(TRAIN_PATH, dtype={'text': 'string'})[:1000]
+    test_dt = pd.read_csv(TEST_PATH, dtype={'text': 'string'})[:100]
 else:
     corpus_size = int(os.environ.get("CORPUS_SIZE"))
-    train_csv = pd.read_csv(TRAIN_PATH)[:corpus_size]
-    test_dt = pd.read_csv(TEST_PATH)[:corpus_size]
+    train_csv = pd.read_csv(TRAIN_PATH, dtype={'text': 'string'})[:corpus_size]
+    test_dt = pd.read_csv(TEST_PATH, dtype={'text': 'string'})[:corpus_size]
+train_csv = train_csv[pd.notnull(train_csv['text'])]
+test_dt = test_dt[pd.notnull(test_dt['text'])]
 train_csv.head()
 
 # + [markdown] pycharm={"name": "#%% md\n"}
@@ -232,13 +235,14 @@ total size : {2}
 
 size of train dataset : {3}
 size of eval dataset : {4}
-size of test dataset : {2}
+size of test dataset : {5}
 """.format(
         len_train_csv,
         len_test_df,
         total_size,
         len(train_dt),
-        len(eval_dt)))
+        len(eval_dt),
+        len(test_dt)))
 
 
 # + [markdown] pycharm={"name": "#%% md\n"}

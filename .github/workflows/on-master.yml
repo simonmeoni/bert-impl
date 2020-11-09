@@ -62,3 +62,22 @@ jobs:
           asset_name: bert_implementation.ipynb 
           # The content-type of the asset you want to upload. See the supported Media Types here: https://www.iana.org/assignments/media-types/media-types.xhtml for more information
           asset_content_type: application/json
+
+      - uses: actions/setup-python@v2
+        with:
+          python-version: 3.8 #install the python needed
+      - run: python deploy_to_kaggle.py
+
+      - uses: harupy/push-kaggle-kernel@master
+        env:
+          # Do not leak your credentials.
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+        with:
+          id: simonmeoni/bert-twitter-sentiment-extraction
+          title: bert-twitter-sentiment-extraction
+          code_file: src/bert_implementation_to_kaggle.ipynb
+          language: python
+          kernel_type: notebook
+          enable_internet: true
+          competition_sources: tweet-sentiment-extraction

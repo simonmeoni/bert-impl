@@ -2,7 +2,7 @@ import pandas as pd
 import torch
 from src.bert_implementation import TwitterDataset, generate_batches, UNK, CLS, SEP
 
-df = pd.read_csv('src/tests/resources/test_data.csv')
+df = pd.read_csv('tests/resources/test_data.csv')
 dataset = TwitterDataset(df.iloc[:4], df.iloc[4:6], df.iloc[6:9])
 expected_sentiment_list = [UNK, 'negative', 'neutral']
 

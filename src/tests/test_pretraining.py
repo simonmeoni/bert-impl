@@ -2,7 +2,7 @@ import pandas as pd
 from src.bert_implementation import TwitterDataset, generate_batched_masked_lm, \
     generate_batches, generate_masked_lm, replace_by_another_token, CLS, SEP, MASK
 
-df_test = pd.read_csv('src/tests/resources/test_data.csv')
+df_test = pd.read_csv('tests/resources/test_data.csv')
 
 
 def test_generate_masked_lm():
