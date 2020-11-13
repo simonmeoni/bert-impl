@@ -57,3 +57,4 @@ jobs:
           kernel_type: notebook
           enable_internet: true
           competition_sources: tweet-sentiment-extraction
+          is_private: false

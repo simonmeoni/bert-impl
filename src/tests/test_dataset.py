@@ -1,6 +1,6 @@
 import pandas as pd
 import torch
-from src.bert_implementation import TwitterDataset, generate_batches, UNK, CLS, SEP
+from src.bert_implementation import TwitterDataset, generate_batches, UNK, CLS, SEP, MASK, PAD
 
 df = pd.read_csv('tests/resources/test_data.csv')
 dataset = TwitterDataset(df.iloc[:4], df.iloc[4:6], df.iloc[6:9])
@@ -42,7 +42,7 @@ def test_get_sentiment_i():
 def test___init_vocab():
     dataset___init_vocab = TwitterDataset(df.iloc[2:4], df.iloc[2:4], df.iloc[2:4])
     err = "these vocabulary must be equals"
-    expected_voc = [UNK, CLS, SEP, 'MASK', '-PRON-', 'boss', 'be', 'bully',
+    expected_voc = [UNK, CLS, SEP, MASK, PAD, '-PRON-', 'boss', 'be', 'bully',
                     '...', 'what', 'interview', '!', 'leave', 'alone']
     assert sorted(dataset___init_vocab.vocabulary['tokens']) == sorted(expected_voc), err
     assert dataset___init_vocab.vocabulary['max_seq_len'] == 8
@@ -50,17 +50,20 @@ def test___init_vocab():
 
 def test_vectorize():
     dataset_vectorize = TwitterDataset(df.iloc[0:0], df.iloc[0:0], df.iloc[0:0])
-    dataset_vectorize.vocabulary['tokens'] = ['of', CLS, 'MASK', 'high',
+    dataset_vectorize.vocabulary['tokens'] = ['of', CLS, PAD, 'high',
                                               'both', SEP, 'sooo', '-PRON-', UNK]
     dataset_vectorize.vocabulary['max_seq_len'] = 5
 
     err = "these vectors must be equals"
 
     # vector : [CLS, 'sooo', 'high', SEP, 'MASK']
+    # noinspection PyArgumentList
     expected_v_1 = torch.LongTensor([1, 6, 3, 5, 2])
     # vector : [CLS, 'both', 'of', 'you', SEP]
+    # noinspection PyArgumentList
     expected_v_2 = torch.LongTensor([1, 4, 0, 7, 5])
     # vector : [CLS, UNK, UNK, UNK, SEP]
+    # noinspection PyArgumentList
     expected_v_3 = torch.LongTensor([1, 8, 8, 8, 5])
     observed_v_1 = dataset_vectorize.vectorize("Sooo high")
     observed_v_2 = dataset_vectorize.vectorize("Both of you")

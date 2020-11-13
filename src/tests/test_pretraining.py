@@ -1,6 +1,6 @@
 import pandas as pd
 from src.bert_implementation import TwitterDataset, generate_batched_masked_lm, \
-    generate_batches, generate_masked_lm, replace_by_another_token, CLS, SEP, MASK
+    generate_batches, generate_masked_lm, replace_by_another_token, CLS, SEP, MASK, PAD
 
 df_test = pd.read_csv('tests/resources/test_data.csv')
 
@@ -34,9 +34,9 @@ def test_generate_masked_lm():
 
 def test_replace_by_another_token():
     t_dataset = TwitterDataset(df_test.iloc[0:1], df_test.iloc[0:1], df_test.iloc[0:1])
-    t_dataset.vocabulary['tokens'] = [CLS, SEP, MASK, 'token_1', 'token_2']
-    replaced_tokens = [replace_by_another_token(3, t_dataset) for _ in range(30)]
-    assert replaced_tokens == [4] * 30
+    t_dataset.vocabulary['tokens'] = [CLS, SEP, MASK, PAD, 'token_1', 'token_2']
+    replaced_tokens = [replace_by_another_token(4, t_dataset) for _ in range(30)]
+    assert replaced_tokens == [5] * 30
 
 
 def test_generate_batched_masked_lm():

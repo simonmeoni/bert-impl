@@ -39,6 +39,8 @@
 import os
 import random
 import math
+import re
+
 import spacy
 import numpy
 import pandas as pd
@@ -47,7 +49,6 @@ import neptune
 import torch
 import torch.optim as optim
 from torch import nn
-from torch.nn.parameter import Parameter
 from torch.nn import functional as f
 from torch.utils.data import Dataset, DataLoader
 
@@ -57,6 +58,7 @@ NEPTUNE_API_TOKEN = os.environ.get("NEPTUNE_API_TOKEN")
 CLS = 'CLS'
 MASK = 'MASK'
 SEP = 'SEP'
+PAD = 'PAD'
 UNK = 'UNK'
 # -
 
@@ -70,11 +72,14 @@ UNK = 'UNK'
 
 class Bert(nn.Module):
     # pylint: disable=too-many-arguments
-    def __init__(self, stack_size, embedding_dim, num_embeddings, dim_w_matrices, mh_size):
+    def __init__(self, stack_size, embedding_dim, num_embeddings,
+                 dim_w_matrices, mh_size, padding_idx=0):
         super().__init__()
+        self.dim_model = dim_w_matrices
         self.emb = nn.Embedding(
             embedding_dim=embedding_dim,
-            num_embeddings=num_embeddings
+            num_embeddings=num_embeddings,
+            padding_idx=padding_idx
         )
         self.encoder_layer = nn.ModuleList()
         for _ in range(stack_size):
@@ -83,7 +88,7 @@ class Bert(nn.Module):
     def forward(self, tokens):
         embeddings = self.emb(tokens)
         pos_embedding = positional_enc(embeddings.shape[1], embeddings.shape[2])
-        z_n = self.encoder_layer[0](pos_embedding + embeddings)
+        z_n = self.encoder_layer[0](pos_embedding + embeddings * math.sqrt(self.dim_model))
         for encoder in self.encoder_layer:
             z_n = encoder(z_n)
         return z_n
@@ -101,12 +106,24 @@ class Bert(nn.Module):
 # is independent and could be compute concurrently
 
 # + pycharm={"name": "#%%\n"}
+
+class FeedForwardNetwork(nn.Module):
+    def __init__(self, input_size, out_size):
+        super().__init__()
+        self.linear_1 = nn.Linear(input_size, out_size)
+        self.linear_2 = nn.Linear(out_size, out_size)
+
+    def forward(self, x_n):
+        out_l1 = f.relu(self.linear_1(x_n))
+        return self.linear_2(out_l1)
+
+
 class Encoder(nn.Module):
     def __init__(self, dim_w_matrices, mh_size, tokens_size):
         super().__init__()
         self.mh_att = MultiHeadAttention(mh_size, tokens_size, dim_w_matrices)
         self.add_norm_l1 = AddNormalizeLayer(tokens_size)
-        self.feed_forward_network = nn.Linear(tokens_size, tokens_size)
+        self.feed_forward_network = FeedForwardNetwork(tokens_size, tokens_size)
         self.add_norm_l2 = AddNormalizeLayer(tokens_size)
 
     def forward(self, x_n):
@@ -121,48 +138,30 @@ class Encoder(nn.Module):
 # ![attention](https://tinyurl.com/y47nyfeg)
 
 # + pycharm={"name": "#%%\n"}
-
-
-def init_weights(x_n, y_n):
-    return nn.init.xavier_uniform_(torch.empty(x_n, y_n))
-
-
 class MultiHeadAttention(nn.Module):
     def __init__(self, multi_head_size, tokens_size, dim_w_matrices):
         super().__init__()
         self.tokens_size = tokens_size
         self.dim_w_matrices = dim_w_matrices
-        self.w_o = Parameter(init_weights(tokens_size, dim_w_matrices * multi_head_size))
-        self.att_heads = nn.ModuleList()
-        for _ in range(multi_head_size):
-            self.att_heads.append(Attention(tokens_size, dim_w_matrices))
-
-    def forward(self, tokens):
-        z_n = []
-        batch_size = tokens.shape[0]
-        for head in self.att_heads:
-            z_n.append(head(tokens).view(self.dim_w_matrices, -1))
-        return self.w_o.mm(torch.cat(z_n)).view(batch_size, -1, self.tokens_size)
-
-
-class Attention(nn.Module):
-    def __init__(self, tokens_size, dim_w_matrices):
-        super().__init__()
-        self.tokens_size = tokens_size
-        self.dim_w_matrices = dim_w_matrices
-
-        self.w_query = Parameter(init_weights(self.tokens_size, self.dim_w_matrices))
-        self.w_key = Parameter(init_weights(self.tokens_size, self.dim_w_matrices))
-        self.w_vector = Parameter(init_weights(self.tokens_size, self.dim_w_matrices))
+        self.multi_head_size = multi_head_size
+        self.linear_o = nn.Linear(self.dim_w_matrices, tokens_size)
+        self.query = nn.Linear(self.tokens_size, self.dim_w_matrices)
+        self.key = nn.Linear(self.tokens_size, self.dim_w_matrices)
+        self.value = nn.Linear(self.tokens_size, self.dim_w_matrices)
 
     def forward(self, tokens):
         batch_size = tokens.shape[0]
-        no_batch_tokens = tokens.view(-1, self.tokens_size)
-        query = no_batch_tokens.mm(self.w_query)
-        key = no_batch_tokens.mm(self.w_query)
-        value = no_batch_tokens.mm(self.w_query)
-        current_z = f.softmax((query.mm(key.t())) / math.sqrt(self.dim_w_matrices), dim=1).mm(value)
-        return current_z.view(batch_size, -1, self.dim_w_matrices)
+        z_n = self.compute_attention(tokens, batch_size)
+        return self.linear_o(z_n.view(batch_size, -1, self.dim_w_matrices))
+
+    def compute_attention(self, tokens, batch_size):
+        d_k = self.dim_w_matrices // self.multi_head_size
+        query_mat = self.query(tokens).view(batch_size, -1, self.multi_head_size, d_k)
+        key_mat = self.key(tokens).view(batch_size, -1, self.multi_head_size, d_k)
+        value_mat = self.value(tokens).view(batch_size, -1, self.multi_head_size, d_k)
+        return f.softmax(
+            (query_mat.matmul(key_mat.transpose(-2, -1)) / math.sqrt(self.dim_w_matrices)), dim=-1
+        ).matmul(value_mat)
 
 
 # + [markdown] pycharm={"name": "#%% md\n"}
@@ -189,7 +188,7 @@ def positional_enc(seq_len, model_dim):
     pos_emb_vector = torch.empty(seq_len, model_dim)
     for pos in range(seq_len):
         for i_col in range(model_dim):
-            power_ind = 10000 ^ (int((2 * i_col) / model_dim))
+            power_ind = 10000 ** ((2 * i_col) / model_dim)
             if i_col % 2 == 0:
                 pos_emb_vector[pos, i_col] = math.sin(pos / power_ind)
             else:
@@ -207,8 +206,8 @@ def positional_enc(seq_len, model_dim):
 TRAIN_PATH = '../input/tweet-sentiment-extraction/train.csv'
 TEST_PATH = '../input/tweet-sentiment-extraction/test.csv'
 if "CORPUS_SIZE" not in os.environ:
-    train_csv = pd.read_csv(TRAIN_PATH, dtype={'text': 'string'})[:1000]
-    test_dt = pd.read_csv(TEST_PATH, dtype={'text': 'string'})[:100]
+    train_csv = pd.read_csv(TRAIN_PATH, dtype={'text': 'string'})[:100]
+    test_dt = pd.read_csv(TEST_PATH, dtype={'text': 'string'})[:10]
 else:
     corpus_size = int(os.environ.get("CORPUS_SIZE"))
     train_csv = pd.read_csv(TRAIN_PATH, dtype={'text': 'string'})[:corpus_size]
@@ -270,7 +269,7 @@ class TwitterDataset(Dataset):
         self.st_voc = [UNK, *self.train_dataset['sentiment'].unique()]
 
     def __init_vocab(self):
-        voc_tokens = [UNK, CLS, SEP, MASK]
+        voc_tokens = [UNK, CLS, SEP, MASK, PAD]
         max_seq_len = 0
         for feat in self.train_dataset['text']:
             if not isinstance(feat, float):
@@ -309,12 +308,13 @@ class TwitterDataset(Dataset):
         else:
             raise ValueError("this dataset doesn't exist !")
 
+    # noinspection PyArgumentList
     def vectorize(self, tokens):
         vector = [self.get_vocabulary_index(t.lemma_) for t in self.spacy_tokenizer(tokens.strip())]
         vector.insert(0, self.get_vocabulary_index(CLS))
         vector.append(self.get_vocabulary_index(SEP))
         while len(vector) < self.vocabulary['max_seq_len']:
-            vector.append(self.get_vocabulary_index(MASK))
+            vector.append(self.get_vocabulary_index(PAD))
         return torch.LongTensor(vector)
 
     def get_vocabulary_index(self, token):
@@ -329,7 +329,7 @@ class TwitterDataset(Dataset):
 
 
 # + [markdown] pycharm={"name": "#%% md\n"}
-# ### Dataset Instanciation
+# ### Dataset Instantiation
 #
 
 # + pycharm={"name": "#%%\n"}
@@ -341,20 +341,20 @@ twitter_dataset = TwitterDataset(train_dt, eval_dt, test_dt)
 # + pycharm={"name": "#%%\n"}
 parameters = {
     "stack_size": 8,
-    "embedding_dim": 32,
+    "embedding_dim": 256,
     "vocabulary_size": twitter_dataset.vocabulary['len_voc'],
-    "bert_weight_matrices": 32,
+    "bert_weight_matrices": 256,
     "multi_head_size": 8,
-    "learning_rate": 0.0001,
-    "batch_size": 5,
-    "epochs": 10,
+    "learning_rate": 0.001,
+    "batch_size": 2,
+    "epochs": 100,
     "device": "cpu",
     "corpus test size": len(test_dt),
     "corpus train size": len(train_csv),
 }
 
 # + [markdown] pycharm={"name": "#%% md\n"}
-# ## Model Instanciation and DataLoader
+# ## Model Instantiation and DataLoader
 #
 
 # + pycharm={"name": "#%%\n"}
@@ -363,7 +363,8 @@ bert = Bert(
     embedding_dim=parameters["embedding_dim"],
     num_embeddings=parameters["vocabulary_size"],
     dim_w_matrices=parameters["bert_weight_matrices"],
-    mh_size=parameters["multi_head_size"]
+    mh_size=parameters["multi_head_size"],
+    padding_idx=twitter_dataset.get_vocabulary_index('PAD')
 )
 
 
@@ -382,13 +383,13 @@ def generate_batches(dataset, batch_size, shuffle=True, drop_last=True, device="
         yield data
 
 
-ce_loss = nn.CrossEntropyLoss()
+ce_loss = nn.CrossEntropyLoss(ignore_index=twitter_dataset.get_vocabulary_index('PAD'))
 optimizer = optim.Adam(bert.parameters(), lr=parameters['learning_rate'])
 
 
 # + [markdown] pycharm={"name": "#%% md\n"}
 # ## Pre-Training & Fine-Tuning
-# For the Pre-Traning, we use instead the RoBERTa learning method.
+# For the Pre-Training, we use instead the RoBERTa learning method.
 # We use only one Pre-Training Task and we mask tokens dynamically.
 # For more details to the dynamic masking
 # see the original paper : https://arxiv.org/pdf/1907.11692.pdf
@@ -397,6 +398,7 @@ optimizer = optim.Adam(bert.parameters(), lr=parameters['learning_rate'])
 # ### Masked LM method
 
 # + pycharm={"name": "#%%\n"}
+# noinspection PyArgumentList
 def generate_masked_lm(vector, dataset, mask_prob=.15, rnd_t_prob=.1, unchanged_prob=.1):
     return torch.LongTensor([
         replace_token(idx_token, dataset, rnd_t_prob, unchanged_prob)
@@ -410,7 +412,7 @@ def generate_masked_lm(vector, dataset, mask_prob=.15, rnd_t_prob=.1, unchanged_
 # -
 
 def is_not_markers(token):
-    return token not in [MASK, CLS, SEP]
+    return token not in [MASK, CLS, SEP, PAD]
 
 
 def replace_token(token, dataset, rnd_t_prob, unchanged_prob):
@@ -428,6 +430,7 @@ def replace_by_another_token(index_token, dataset):
         dataset.get_vocabulary_index(CLS),
         dataset.get_vocabulary_index(SEP),
         dataset.get_vocabulary_index(MASK),
+        dataset.get_vocabulary_index(PAD),
         index_token
     ]
     while replaced_index_t in not_include_t:
@@ -446,17 +449,19 @@ def generate_batched_masked_lm(batched_vectors, dataset,
 
 
 # ### Pre-Training Classifier
-# a pre-training classifier is needed to predict the masked token
+# a pre-training l_1 is needed to predict the masked token
 # Bert model give only a bi contextual representation of the sentence
 
 class PreTrainingClassifier(nn.Module):
     def __init__(self, zn_size, voc_size):
         super().__init__()
-        self.classifier = nn.Linear(zn_size, voc_size)
+        self.l_1 = nn.Linear(zn_size, voc_size)
+        self.l_2 = nn.Linear(voc_size, voc_size)
 
     def forward(self, z_n):
-        out = self.classifier(z_n)
-        return f.softmax(out, dim=2)
+        l1_out = f.relu((self.l_1(z_n)))
+        out = self.l_2(l1_out)
+        return out
 
 
 # ## Pre-Training Step
@@ -486,10 +491,18 @@ for epoch in range(parameters['epochs']):
         # Step 5: Trigger the optimizer to perform one update
         optimizer.step()
         neptune.log_metric('train loss', loss.item())
-        neptune.send_text('train text observed', ' '.join(
-            twitter_dataset.get_tokens(torch.argmax(y_pred, dim=2)[-1]))
-        )
-        neptune.send_text('train text expected', ' '.join(twitter_dataset.get_tokens(y_target[-1])))
+        RAW_TEXT_OBSERVED = ' '.join(twitter_dataset.get_tokens(torch.argmax(y_pred, dim=2)[-1]))
+        neptune.send_text('raw train text observed', RAW_TEXT_OBSERVED
+                          )
+        RAW_TEXT_EXPECTED = ' '.join(twitter_dataset.get_tokens(y_target[-1]))
+        neptune.send_text('raw train text expected', RAW_TEXT_EXPECTED)
+
+        PATTERN = "CLS (.*?) SEP"
+        neptune.send_text('clean train text observed',
+                          re.search(PATTERN, RAW_TEXT_OBSERVED).group(1)
+                          if re.search(PATTERN, RAW_TEXT_OBSERVED) else 'there is no markers ! ')
+        neptune.send_text('clean train text expected',
+                          re.search(PATTERN, RAW_TEXT_EXPECTED).group(1))
 
     twitter_dataset.switch_to_dataset("eval")
     # evaluation loop
