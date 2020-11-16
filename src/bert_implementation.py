@@ -54,12 +54,19 @@ from torch.utils.data import Dataset, DataLoader
 
 NEPTUNE_API_TOKEN = os.environ.get("NEPTUNE_API_TOKEN")
 
-
 CLS = 'CLS'
 MASK = 'MASK'
 SEP = 'SEP'
 PAD = 'PAD'
 UNK = 'UNK'
+
+# enable cuda if it exists
+if torch.cuda.is_available():
+    TORCH_DEVICE = "cuda:0"
+else:
+    TORCH_DEVICE = "cpu"
+
+current_device = torch.device(TORCH_DEVICE)
 # -
 
 # ### Bert Encoder Stacks
@@ -87,7 +94,8 @@ class Bert(nn.Module):
 
     def forward(self, tokens):
         embeddings = self.emb(tokens)
-        pos_embedding = positional_enc(embeddings.shape[1], embeddings.shape[2])
+        pos_embedding = positional_enc(embeddings.shape[1], embeddings.shape[2],
+                                       self.emb.weight.device.type)
         z_n = self.encoder_layer[0](pos_embedding + embeddings * math.sqrt(self.dim_model))
         for encoder in self.encoder_layer:
             z_n = encoder(z_n)
@@ -184,8 +192,8 @@ class AddNormalizeLayer(nn.Module):
 
 # + pycharm={"name": "#%%\n"}
 
-def positional_enc(seq_len, model_dim):
-    pos_emb_vector = torch.empty(seq_len, model_dim)
+def positional_enc(seq_len, model_dim, device="cpu"):
+    pos_emb_vector = torch.empty(seq_len, model_dim).to(device)
     for pos in range(seq_len):
         for i_col in range(model_dim):
             power_ind = 10000 ** ((2 * i_col) / model_dim)
@@ -346,9 +354,9 @@ parameters = {
     "bert_weight_matrices": 256,
     "multi_head_size": 8,
     "learning_rate": 0.001,
-    "batch_size": 2,
+    "batch_size": 5,
     "epochs": 100,
-    "device": "cpu",
+    "device": current_device,
     "corpus test size": len(test_dt),
     "corpus train size": len(train_csv),
 }
@@ -365,7 +373,7 @@ bert = Bert(
     dim_w_matrices=parameters["bert_weight_matrices"],
     mh_size=parameters["multi_head_size"],
     padding_idx=twitter_dataset.get_vocabulary_index('PAD')
-)
+).to(current_device)
 
 
 def generate_batches(dataset, batch_size, shuffle=True, drop_last=True, device="cpu"):
@@ -383,7 +391,8 @@ def generate_batches(dataset, batch_size, shuffle=True, drop_last=True, device="
         yield data
 
 
-ce_loss = nn.CrossEntropyLoss(ignore_index=twitter_dataset.get_vocabulary_index('PAD'))
+ce_loss = nn.CrossEntropyLoss(ignore_index=twitter_dataset.get_vocabulary_index('PAD'))\
+    .to(current_device)
 optimizer = optim.Adam(bert.parameters(), lr=parameters['learning_rate'])
 
 
@@ -467,7 +476,8 @@ class PreTrainingClassifier(nn.Module):
 # ## Pre-Training Step
 # ### Training and Evaluation Loop
 
-classifier = PreTrainingClassifier(parameters['embedding_dim'], parameters['vocabulary_size'])
+classifier = PreTrainingClassifier(parameters['embedding_dim'], parameters['vocabulary_size'])\
+    .to(current_device)
 
 # + pycharm={"name": "#%%\n"}
 neptune.init('smeoni/bert-impl', api_token=NEPTUNE_API_TOKEN)
@@ -475,10 +485,12 @@ neptune.create_experiment(name='bert-impl-experiment', params=parameters)
 for epoch in range(parameters['epochs']):
     # train loop
     twitter_dataset.switch_to_dataset("train")
-    for batch in generate_batches(twitter_dataset, parameters['batch_size'],
+    for batch in generate_batches(twitter_dataset,
+                                  parameters['batch_size'],
                                   device=parameters['device']):
-        x_obs = generate_batched_masked_lm(batch['vectorized_tokens'], twitter_dataset)
-        y_target = batch['vectorized_tokens']
+        x_obs = generate_batched_masked_lm(batch['vectorized_tokens'],
+                                           twitter_dataset).to(current_device)
+        y_target = batch['vectorized_tokens'].to(current_device)
         # Step 1: Clear the gradients
         bert.zero_grad()
         # Step 2: Compute the forward pass of the model
@@ -506,10 +518,12 @@ for epoch in range(parameters['epochs']):
 
     twitter_dataset.switch_to_dataset("eval")
     # evaluation loop
-    for batch in generate_batches(twitter_dataset, parameters['batch_size'],
+    for batch in generate_batches(twitter_dataset,
+                                  parameters['batch_size'],
                                   device=parameters['device']):
-        x_obs = generate_batched_masked_lm(batch['vectorized_tokens'], twitter_dataset)
-        y_target = batch['vectorized_tokens']
+        x_obs = generate_batched_masked_lm(batch['vectorized_tokens'], twitter_dataset)\
+            .to(current_device)
+        y_target = batch['vectorized_tokens'].to(current_device)
         # Step 1: Compute the forward pass of the model
         bert_zn = bert(x_obs)
         y_pred = classifier(bert_zn)
@@ -522,10 +536,12 @@ for epoch in range(parameters['epochs']):
 # -
 
 twitter_dataset.switch_to_dataset("test")
-for batch in generate_batches(twitter_dataset, parameters['batch_size'],
+for batch in generate_batches(twitter_dataset,
+                              parameters['batch_size'],
                               device=parameters['device']):
-    x_obs = generate_batched_masked_lm(batch['vectorized_tokens'], twitter_dataset)
-    y_target = batch['vectorized_tokens']
+    x_obs = generate_batched_masked_lm(batch['vectorized_tokens'], twitter_dataset)\
+        .to(current_device)
+    y_target = batch['vectorized_tokens'].to(current_device)
     # Step 1: Compute the forward pass of the model
     bert_zn = bert(x_obs)
     y_pred = classifier(bert_zn)

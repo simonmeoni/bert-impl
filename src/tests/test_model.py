@@ -32,7 +32,7 @@ def test_positional_enc():
         [0, 1.0000e+00, 0.0000e+00, 1.0000e+00],
         [8.4147e-01, 9.9995e-01, 1.0000e-04, 1.0000e+00]
     ])
-    observed = positional_enc(2, 4)
+    observed = positional_enc(2, 4, device="cpu")
     assert torch.allclose(observed, expected), err
 
 
@@ -49,12 +49,12 @@ def test_bert():
     test_tensor = torch.LongTensor([
         [0, 1, 4],
         [3, 2, 1]
-    ])
+    ]).to("cpu")
     bert = Bert(
         stack_size=6,
         embedding_dim=4,
         num_embeddings=5,
         dim_w_matrices=8,
         mh_size=4
-    )
+    ).to("cpu")
     assert bert(test_tensor).shape == (2, 3, 4), err
