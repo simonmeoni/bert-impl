@@ -62,7 +62,7 @@ UNK = 'UNK'
 
 # enable cuda if it exists
 if torch.cuda.is_available():
-    TORCH_DEVICE = "cuda:0"
+    TORCH_DEVICE = "cuda"
 else:
     TORCH_DEVICE = "cpu"
 
@@ -486,8 +486,9 @@ def no_learning_loop(corpus, model, no_learn_loss, dataset, no_learn_device):
     # evaluation loop
     for no_learn_batch in generate_batches(dataset, parameters['batch_size'],
                                   device=no_learn_device):
-        no_learn_x_obs = generate_batched_masked_lm(no_learn_batch['vectorized_tokens'], dataset)
-        no_learn_y_target = no_learn_batch['vectorized_tokens']
+        no_learn_x_obs = generate_batched_masked_lm(no_learn_batch['vectorized_tokens'], dataset)\
+            .to(no_learn_device)
+        no_learn_y_target = no_learn_batch['vectorized_tokens'].to(no_learn_device)
         # Step 1: Compute the forward pass of the model
         no_learn_zn = model(no_learn_x_obs)
         no_learn_y_pred = classifier(no_learn_zn)
