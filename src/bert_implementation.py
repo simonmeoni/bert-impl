@@ -79,18 +79,18 @@ current_device = torch.device(TORCH_DEVICE)
 
 class Bert(nn.Module):
     # pylint: disable=too-many-arguments
-    def __init__(self, stack_size, embedding_dim, num_embeddings,
-                 dim_w_matrices, mh_size, padding_idx=0):
+    def __init__(self, stack_size, voc_size,
+                 dim_model, mh_size, padding_idx=0):
         super().__init__()
-        self.dim_model = dim_w_matrices
+        self.dim_model = dim_model
         self.emb = nn.Embedding(
-            embedding_dim=embedding_dim,
-            num_embeddings=num_embeddings,
+            embedding_dim=dim_model,
+            num_embeddings=voc_size,
             padding_idx=padding_idx
         )
         self.encoder_layer = nn.ModuleList()
         for _ in range(stack_size):
-            self.encoder_layer.append(Encoder(dim_w_matrices, mh_size, embedding_dim))
+            self.encoder_layer.append(Encoder(dim_model, mh_size))
 
     def forward(self, tokens):
         embeddings = self.emb(tokens)
@@ -116,10 +116,10 @@ class Bert(nn.Module):
 # + pycharm={"name": "#%%\n"}
 
 class FeedForwardNetwork(nn.Module):
-    def __init__(self, input_size, out_size):
+    def __init__(self, dim_model):
         super().__init__()
-        self.linear_1 = nn.Linear(input_size, out_size)
-        self.linear_2 = nn.Linear(out_size, out_size)
+        self.linear_1 = nn.Linear(dim_model, dim_model)
+        self.linear_2 = nn.Linear(dim_model, dim_model)
 
     def forward(self, x_n):
         out_l1 = f.relu(self.linear_1(x_n))
@@ -127,12 +127,12 @@ class FeedForwardNetwork(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, dim_w_matrices, mh_size, tokens_size):
+    def __init__(self, dim_model, mh_size):
         super().__init__()
-        self.mh_att = MultiHeadAttention(mh_size, tokens_size, dim_w_matrices)
-        self.add_norm_l1 = AddNormalizeLayer(tokens_size)
-        self.feed_forward_network = FeedForwardNetwork(tokens_size, tokens_size)
-        self.add_norm_l2 = AddNormalizeLayer(tokens_size)
+        self.mh_att = MultiHeadAttention(mh_size, dim_model)
+        self.add_norm_l1 = AddNormalizeLayer(dim_model)
+        self.feed_forward_network = FeedForwardNetwork(dim_model)
+        self.add_norm_l2 = AddNormalizeLayer(dim_model)
 
     def forward(self, x_n):
         z_n = self.mh_att(x_n)
@@ -147,28 +147,27 @@ class Encoder(nn.Module):
 
 # + pycharm={"name": "#%%\n"}
 class MultiHeadAttention(nn.Module):
-    def __init__(self, multi_head_size, tokens_size, dim_w_matrices):
+    def __init__(self, multi_head_size, dim_model):
         super().__init__()
-        self.tokens_size = tokens_size
-        self.dim_w_matrices = dim_w_matrices
+        self.dim_model = dim_model
         self.multi_head_size = multi_head_size
-        self.linear_o = nn.Linear(self.dim_w_matrices, tokens_size)
-        self.query = nn.Linear(self.tokens_size, self.dim_w_matrices)
-        self.key = nn.Linear(self.tokens_size, self.dim_w_matrices)
-        self.value = nn.Linear(self.tokens_size, self.dim_w_matrices)
+        self.linear_o = nn.Linear(self.dim_model, self.dim_model)
+        self.query = nn.Linear(self.dim_model, self.dim_model)
+        self.key = nn.Linear(self.dim_model, self.dim_model)
+        self.value = nn.Linear(self.dim_model, self.dim_model)
 
     def forward(self, tokens):
         batch_size = tokens.shape[0]
         z_n = self.compute_attention(tokens, batch_size)
-        return self.linear_o(z_n.view(batch_size, -1, self.dim_w_matrices))
+        return self.linear_o(z_n.view(batch_size, -1, self.dim_model))
 
     def compute_attention(self, tokens, batch_size):
-        d_k = self.dim_w_matrices // self.multi_head_size
+        d_k = self.dim_model // self.multi_head_size
         query_mat = self.query(tokens).view(batch_size, -1, self.multi_head_size, d_k)
         key_mat = self.key(tokens).view(batch_size, -1, self.multi_head_size, d_k)
         value_mat = self.value(tokens).view(batch_size, -1, self.multi_head_size, d_k)
         return f.softmax(
-            (query_mat.matmul(key_mat.transpose(-2, -1)) / math.sqrt(self.dim_w_matrices)), dim=-1
+            (query_mat.matmul(key_mat.transpose(-2, -1)) / math.sqrt(self.dim_model)), dim=-1
         ).matmul(value_mat)
 
 
@@ -349,10 +348,9 @@ twitter_dataset = TwitterDataset(train_dt, eval_dt, test_dt)
 # + pycharm={"name": "#%%\n"}
 parameters = {
     "stack_size": 8,
-    "embedding_dim": 256,
     "vocabulary_size": twitter_dataset.vocabulary['len_voc'],
-    "bert_weight_matrices": 256,
-    "multi_head_size": 8,
+    "bert_dim_model": 256,
+    "multi_heads": 8,
     "learning_rate": 0.001,
     "batch_size": 5,
     "epochs": 100,
@@ -368,10 +366,9 @@ parameters = {
 # + pycharm={"name": "#%%\n"}
 bert = Bert(
     stack_size=parameters["stack_size"],
-    embedding_dim=parameters["embedding_dim"],
-    num_embeddings=parameters["vocabulary_size"],
-    dim_w_matrices=parameters["bert_weight_matrices"],
-    mh_size=parameters["multi_head_size"],
+    voc_size=parameters["vocabulary_size"],
+    dim_model=parameters["bert_dim_model"],
+    mh_size=parameters["multi_heads"],
     padding_idx=twitter_dataset.get_vocabulary_index('PAD')
 ).to(current_device)
 
@@ -476,12 +473,30 @@ class PreTrainingClassifier(nn.Module):
 # ## Pre-Training Step
 # ### Training and Evaluation Loop
 
-classifier = PreTrainingClassifier(parameters['embedding_dim'], parameters['vocabulary_size'])\
+classifier = PreTrainingClassifier(parameters['bert_dim_model'], parameters['vocabulary_size'])\
     .to(current_device)
 
 # + pycharm={"name": "#%%\n"}
 neptune.init('smeoni/bert-impl', api_token=NEPTUNE_API_TOKEN)
 neptune.create_experiment(name='bert-impl-experiment', params=parameters)
+
+
+def no_learning_loop(corpus, model, no_learn_loss, dataset, no_learn_device):
+    dataset.switch_to_dataset(corpus)
+    # evaluation loop
+    for no_learn_batch in generate_batches(dataset, parameters['batch_size'],
+                                  device=no_learn_device):
+        no_learn_x_obs = generate_batched_masked_lm(no_learn_batch['vectorized_tokens'], dataset)
+        no_learn_y_target = no_learn_batch['vectorized_tokens']
+        # Step 1: Compute the forward pass of the model
+        no_learn_zn = model(no_learn_x_obs)
+        no_learn_y_pred = classifier(no_learn_zn)
+        # Step 2: Compute the loss value that we wish to optimize
+        no_learn_loss = no_learn_loss(no_learn_y_pred.reshape(-1, no_learn_y_pred.shape[2]),
+                                      no_learn_y_target.reshape(-1))
+        neptune.log_metric(corpus + 'loss', no_learn_loss.item())
+
+
 for epoch in range(parameters['epochs']):
     # train loop
     twitter_dataset.switch_to_dataset("train")
@@ -516,38 +531,11 @@ for epoch in range(parameters['epochs']):
         neptune.send_text('clean train text expected',
                           re.search(PATTERN, RAW_TEXT_EXPECTED).group(1))
 
-    twitter_dataset.switch_to_dataset("eval")
-    # evaluation loop
-    for batch in generate_batches(twitter_dataset,
-                                  parameters['batch_size'],
-                                  device=parameters['device']):
-        x_obs = generate_batched_masked_lm(batch['vectorized_tokens'], twitter_dataset)\
-            .to(current_device)
-        y_target = batch['vectorized_tokens'].to(current_device)
-        # Step 1: Compute the forward pass of the model
-        bert_zn = bert(x_obs)
-        y_pred = classifier(bert_zn)
-        # Step 2: Compute the loss value that we wish to optimize
-        loss = ce_loss(y_pred.reshape(-1, y_pred.shape[2]), y_target.reshape(-1))
-        neptune.log_metric('eval loss', loss.item())
+    no_learning_loop('eval', bert, ce_loss, twitter_dataset, parameters['device'])
 
 # + [markdown] pycharm={"name": "#%% md\n"}
 # ### Test Loop
 # -
-
-twitter_dataset.switch_to_dataset("test")
-for batch in generate_batches(twitter_dataset,
-                              parameters['batch_size'],
-                              device=parameters['device']):
-    x_obs = generate_batched_masked_lm(batch['vectorized_tokens'], twitter_dataset)\
-        .to(current_device)
-    y_target = batch['vectorized_tokens'].to(current_device)
-    # Step 1: Compute the forward pass of the model
-    bert_zn = bert(x_obs)
-    y_pred = classifier(bert_zn)
-    # Step 2: Compute the loss value that we wish to optimize
-    loss = ce_loss(y_pred.reshape(-1, y_pred.shape[2]), y_target.reshape(-1))
-    neptune.log_metric('test loss', loss.item())
-neptune.stop()
+no_learning_loop('test', bert, ce_loss, twitter_dataset, parameters['device'])
 # + [markdown] pycharm={"name": "#%% md\n"}
 # ## Experimentation

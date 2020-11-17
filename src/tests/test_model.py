@@ -5,14 +5,14 @@ from src.bert_implementation import AddNormalizeLayer, Encoder, \
 
 def test_compute_attention():
     err = "the size must be equal to this set"
-    att = MultiHeadAttention(2, 4, 4)
+    att = MultiHeadAttention(2, 4)
     test_tensor = torch.rand(6, 4, 4)
     assert att.compute_attention(test_tensor, 6).shape == (6, 4, 2, 2), err
 
 
 def test_multi_head_attention():
     err = "the size must be equal to this set"
-    att = MultiHeadAttention(2, 4, 4)
+    att = MultiHeadAttention(2, 4)
     test_tensor = torch.rand(3, 2, 4)
     assert att(test_tensor).shape == (3, 2, 4), err
 
@@ -39,7 +39,7 @@ def test_positional_enc():
 def test_encoder():
     err = "the size must be equal to this set"
     test_tensor = torch.rand(3, 2, 4)
-    encoder = Encoder(3, 3, 4)
+    encoder = Encoder(4, 4)
     assert encoder(test_tensor).shape == (3, 2, 4), err
 
 
@@ -52,9 +52,8 @@ def test_bert():
     ]).to("cpu")
     bert = Bert(
         stack_size=6,
-        embedding_dim=4,
-        num_embeddings=5,
-        dim_w_matrices=8,
+        voc_size=5,
+        dim_model=4,
         mh_size=4
     ).to("cpu")
     assert bert(test_tensor).shape == (2, 3, 4), err
