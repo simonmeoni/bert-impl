@@ -493,9 +493,9 @@ def no_learning_loop(corpus, model, no_learn_loss, dataset, no_learn_device):
         no_learn_zn = model(no_learn_x_obs)
         no_learn_y_pred = classifier(no_learn_zn)
         # Step 2: Compute the loss value that we wish to optimize
-        no_learn_loss = no_learn_loss(no_learn_y_pred.reshape(-1, no_learn_y_pred.shape[2]),
+        no_learn_loss_res = no_learn_loss(no_learn_y_pred.reshape(-1, no_learn_y_pred.shape[2]),
                                       no_learn_y_target.reshape(-1))
-        neptune.log_metric(corpus + 'loss', no_learn_loss.item())
+        neptune.log_metric(corpus + ' loss', no_learn_loss_res.item())
 
 
 for epoch in range(parameters['epochs']):
@@ -538,5 +538,6 @@ for epoch in range(parameters['epochs']):
 # ### Test Loop
 # -
 no_learning_loop('test', bert, ce_loss, twitter_dataset, parameters['device'])
+neptune.stop()
 # + [markdown] pycharm={"name": "#%% md\n"}
 # ## Experimentation
