@@ -159,3 +159,11 @@ src/*.ipynb
 src/tests/*.ipynb
 settings.json
 .vscode/launch.json
+!/deploy_to_kaggle.ipynb
+src/dataset.model
+src/dataset.vocab
+!/output/
+output/
+src/tweet-sentiment-extraction.model
+src/tweet-sentiment-extraction.txt
+src/tweet-sentiment-extraction.vocab

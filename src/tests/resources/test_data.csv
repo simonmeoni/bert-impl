@@ -1,13 +1,11 @@
-textID,text,selected_text,sentiment
-cb774db0d1," I`d have responded, if I were going","I`d have responded, if I were going",neutral
-549e992a42, Sooo SAD I will miss you here in San Diego!!!,Sooo SAD,negative
-088c60f138,my boss is bullying me...,bullying me,negative
-9642c003ef, what interview! leave me alone,leave me alone,negative
-358bd9e861," Sons of ****, why couldn`t they put them on the releases we already bought","Sons of ****,",negative
-28b57f3990,http://www.dothebouncy.com/smf - some shameless plugging for the best Rangers forum on earth,http://www.dothebouncy.com/smf - some shameless plugging for the best Rangers forum on earth,neutral
-6e0c6d75b1,2am feedings for the baby are fun when he is all smiles and coos,fun,positive
-50e14c0bb8,Soooo high,Soooo high,neutral
-e050245fbd, Both of you,Both of you,neutral
-fc2cbefa9d, Journey!? Wow... u just became cooler.  hehe... (is that possible!?),Wow... u just became cooler.,positive
-2339a9b08b," as much as i love to be hopeful, i reckon the chances are minimal =P i`m never gonna get my cake and stuff","as much as i love to be hopeful, i reckon the chances are minimal =P i`m never gonna get my cake and stuff",neutral
-16fab9f95b,I really really like the song Love Story by Taylor Swift,like,positive
+textID,text,sentiment,sequence length
+cb774db0d1," i`d have responded, if i were going",neutral,11
+549e992a42, sooo sad i will miss you here in san diego!!!,negative,11
+088c60f138,my boss is bullying me...,negative,8
+9642c003ef, what interview! leave me alone,negative,6
+358bd9e861," sons of ****, why couldn`t they put them on the releases we already bought",negative,19
+6e0c6d75b1,2am feedings for the baby are fun when he is all smiles and coos,positive,18
+fc2cbefa9d, journey!? wow... u just became cooler.  hehe... (is that possible!?),positive,19
+2339a9b08b," as much as i love to be hopeful, i reckon the chances are minimal =p i`m never gonna get my cake and stuff",neutral,30
+16fab9f95b,i really really like the song love story by taylor swift,positive,11
+74a76f6e0a,my sharpie is running dangerously low on ink,negative,11

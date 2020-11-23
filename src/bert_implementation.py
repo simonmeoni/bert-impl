@@ -6,13 +6,11 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.6.0
+#       jupytext_version: 1.7.1
 #   kernelspec:
-#     display_name: 'Python 3.7.9 64-bit (''bert'': conda)'
-#     metadata:
-#       interpreter:
-#         hash: 52a97d57a70876463eed4fac2064bbbe8674799a9b35183dbfc475f4ebf43b46
-#     name: 'Python 3.7.9 64-bit (''bert'': conda)'
+#     display_name: Python 3
+#     language: python
+#     name: python3
 # ---
 
 # + [markdown] pycharm={"name": "#%% md\n"}
@@ -36,16 +34,15 @@
 # to set the size of corpus if it needed
 # + pycharm={"name": "#%%\n"}
 
+import math
 import os
 import random
-import math
-import re
-
-import spacy
-import numpy
-import pandas as pd
 
 import neptune
+import numpy
+import pandas as pd
+import seaborn as sns
+import sentencepiece as spm
 import torch
 import torch.optim as optim
 from torch import nn
@@ -67,6 +64,8 @@ else:
     TORCH_DEVICE = "cpu"
 
 current_device = torch.device(TORCH_DEVICE)
+
+
 # -
 
 # ### Bert Encoder Stacks
@@ -203,25 +202,96 @@ def positional_enc(seq_len, model_dim, device="cpu"):
     return pos_emb_vector
 
 
-# + [markdown] pycharm={"name": "#%% md\n"}
-# ## Dataset : Analyze & Vectorization
 # -
 
-# ### import csv
+# ## Import CSV files
 
 # + pycharm={"name": "#%%\n"}
 TRAIN_PATH = '../input/tweet-sentiment-extraction/train.csv'
 TEST_PATH = '../input/tweet-sentiment-extraction/test.csv'
-if "CORPUS_SIZE" not in os.environ:
-    train_csv = pd.read_csv(TRAIN_PATH, dtype={'text': 'string'})[:100]
-    test_dt = pd.read_csv(TEST_PATH, dtype={'text': 'string'})[:10]
-else:
-    corpus_size = int(os.environ.get("CORPUS_SIZE"))
-    train_csv = pd.read_csv(TRAIN_PATH, dtype={'text': 'string'})[:corpus_size]
-    test_dt = pd.read_csv(TEST_PATH, dtype={'text': 'string'})[:corpus_size]
-train_csv = train_csv[pd.notnull(train_csv['text'])]
-test_dt = test_dt[pd.notnull(test_dt['text'])]
+train_csv = pd.read_csv(TRAIN_PATH, dtype={'text': 'string'})
+test_dt = pd.read_csv(TEST_PATH, dtype={'text': 'string'})
+# -
+
+# ### Cleaning and Normalization Step before Sentence Piece Training
+
+# + pycharm={"name": "#%%\n"}
+train_csv = train_csv.dropna()
+train_csv = train_csv.reset_index(drop=True)
+test_dt = test_dt.dropna()
+test_dt = test_dt.reset_index(drop=True)
+train_csv['text'] = train_csv['text'].str.lower()
+test_dt['text'] = test_dt['text'].str.lower()
 train_csv.head()
+# -
+
+# ## Train & Initialize Sentence Piece
+
+# + pycharm={"name": "#%%\n"}
+PATH = './tweet-sentiment-extraction'
+with open(PATH + '.txt', 'w') as voc_txt:
+    for t in train_csv['text']:
+        voc_txt.write(t + '\n')
+SPM_ARGS = "" \
+           "--input={0}.txt " \
+           "--model_prefix={0} " \
+           "--pad_id=0 " \
+           "--unk_id=1 " \
+           "--bos_id=2 " \
+           "--eos_id=3 " \
+           "--pad_piece={1} " \
+           "--unk_piece={2} " \
+           "--bos_piece={3} " \
+           "--eos_piece={4}" \
+    .format(PATH, PAD, UNK, CLS, SEP)
+spm.SentencePieceTrainer.Train(SPM_ARGS)
+sp = spm.SentencePieceProcessor()
+sp.Load(PATH + '.model')
+print(sp.EncodeAsPieces('this is a test'))
+print(sp.EncodeAsIds('this is a test'))
+# -
+
+# ## Dataset : Analyze & Vectorization
+
+# ### resize the corpus if it needed
+
+# + pycharm={"name": "#%%\n"}
+if "CORPUS_SIZE" in os.environ:
+    corpus_size = int(os.environ.get("CORPUS_SIZE"))
+    train_csv = train_csv[:corpus_size]
+    test_dt = test_dt[:corpus_size]
+else:
+    train_csv = train_csv[:100]
+    test_dt = test_dt[:10]
+
+# -
+
+# ### analysis
+
+# + pycharm={"name": "#%%\n"}
+train_csv['sequence length'] = ''
+URL_COUNT = 0
+for idx, d in enumerate(train_csv.iloc):
+    train_csv.at[idx, 'sequence length'] = len(sp.EncodeAsIds(d['text']))
+    URL_COUNT = URL_COUNT + 1 if 'http' in d['text'] else URL_COUNT
+for idx, d in enumerate(test_dt.iloc):
+    test_dt.at[idx, 'sequence length'] = len(sp.EncodeAsIds(d['text']))
+sns.set(font_scale=2)
+sns.displot(x='sequence length', data=train_csv, aspect=2, height=20)
+print('number of entries containing a url : ' + str(URL_COUNT))
+print('number of entries in train.csv : ' + str(len(train_csv)))
+# -
+
+# ### Filter the entries containing url and the less frequent length sequences
+
+# + pycharm={"name": "#%%\n"}
+del train_csv['selected_text']
+train_csv = train_csv.drop(train_csv[train_csv['sequence length'].ge(35)].index)
+train_csv = train_csv.drop(train_csv[train_csv['sequence length'].le(5)].index)
+train_csv = train_csv[~train_csv.text.str.contains('http')]
+train_csv = train_csv.reset_index(drop=True)
+print('number of entries in train.csv after filtering : ' + str(len(train_csv)))
+sns.displot(x='sequence length', data=train_csv, aspect=2, height=20)
 
 # + [markdown] pycharm={"name": "#%% md\n"}
 # ### split & create training, evaluation & test datasets
@@ -256,45 +326,22 @@ size of test dataset : {5}
 
 # + pycharm={"name": "#%%\n"} tags=[]
 class TwitterDataset(Dataset):
-    def __init__(self, train_dataset, eval_dataset, test_dataset):
+    def __init__(self, train_dataset, eval_dataset, test_dataset, sentence_piece):
         self.train_dataset = train_dataset
         self.eval_dataset = eval_dataset
-        self.test_dataset = test_dataset
         self.current_dataset = self.train_dataset
-        self.spacy_tokenizer = spacy.load('en_core_web_sm', disable=['ner', 'parser'])
-
+        self.test_dataset = test_dataset
+        self.sentence_piece = sentence_piece
         self.st_voc = []
-        self.vocabulary = {
-            'tokens': [],
-            'max_seq_len': 0,
-            'len_voc': 0
-        }
+        self.max_seq_len = int(pd.concat(
+            [train_dataset, eval_dataset, test_dataset])['sequence length'].max()) + 2
         self.__init_sentiment_vocab()
-        self.__init_vocab()
 
     def __init_sentiment_vocab(self):
         self.st_voc = [UNK, *self.train_dataset['sentiment'].unique()]
 
-    def __init_vocab(self):
-        voc_tokens = [UNK, CLS, SEP, MASK, PAD]
-        max_seq_len = 0
-        for feat in self.train_dataset['text']:
-            if not isinstance(feat, float):
-                tokens, max_seq_len = self.extract_tokens(feat, max_seq_len)
-                voc_tokens = [*voc_tokens, *tokens]
-                voc_tokens = list(set(voc_tokens))
-        for feat in pd.concat([self.eval_dataset['text'], self.test_dataset['text']]):
-            if not isinstance(feat, float):
-                _, max_seq_len = self.extract_tokens(feat, max_seq_len)
-
-        self.vocabulary['max_seq_len'] = max_seq_len + 2
-        self.vocabulary['tokens'] = voc_tokens
-        self.vocabulary['len_voc'] = len(self.vocabulary['tokens'])
-
-    def extract_tokens(self, feat, max_seq_len):
-        tokens = [t.lemma_ for t in self.spacy_tokenizer(feat.strip())]
-        max_seq_len = len(tokens) if len(tokens) > max_seq_len else max_seq_len
-        return tokens, max_seq_len
+    def get_vocab_size(self):
+        return self.sentence_piece.vocab_size() + 1
 
     def __getitem__(self, index):
         return {
@@ -317,19 +364,27 @@ class TwitterDataset(Dataset):
 
     # noinspection PyArgumentList
     def vectorize(self, tokens):
-        vector = [self.get_vocabulary_index(t.lemma_) for t in self.spacy_tokenizer(tokens.strip())]
-        vector.insert(0, self.get_vocabulary_index(CLS))
-        vector.append(self.get_vocabulary_index(SEP))
-        while len(vector) < self.vocabulary['max_seq_len']:
-            vector.append(self.get_vocabulary_index(PAD))
-        return torch.LongTensor(vector)
+        vector = self.sentence_piece.EncodeAsIds(tokens)
+        return torch.LongTensor(
+            [sp.bos_id()] + vector + [sp.eos_id()] +
+            [self.get_pad()] * (self.max_seq_len - len(vector) - 2)
+        )
 
-    def get_vocabulary_index(self, token):
-        tokens = self.vocabulary['tokens']
-        return self.vocabulary['tokens'].index(token) if token in tokens else tokens.index(UNK)
+    def get_mask(self):
+        return self.sentence_piece.vocab_size()
 
-    def get_tokens(self, tokens):
-        return [self.vocabulary['tokens'][token] for token in tokens]
+    def get_pad(self):
+        return self.sentence_piece.pad_id()
+
+    def get_cls(self):
+        return self.sentence_piece.bos_id()
+
+    def get_sep(self):
+        return self.sentence_piece.eos_id()
+
+    def get_tokens(self, ids):
+        return ' '.join([self.sentence_piece.Decode(i) if i != self.get_mask()
+                         else MASK for i in ids.tolist()]).strip()
 
     def get_sentiment_i(self, st_token):
         return self.st_voc.index(st_token) if st_token in self.st_voc else self.st_voc.index(UNK)
@@ -340,7 +395,7 @@ class TwitterDataset(Dataset):
 #
 
 # + pycharm={"name": "#%%\n"}
-twitter_dataset = TwitterDataset(train_dt, eval_dt, test_dt)
+twitter_dataset = TwitterDataset(train_dt, eval_dt, test_dt, sp)
 
 # + [markdown] pycharm={"name": "#%% md\n"}
 # ## Parameters
@@ -348,7 +403,7 @@ twitter_dataset = TwitterDataset(train_dt, eval_dt, test_dt)
 # + pycharm={"name": "#%%\n"}
 parameters = {
     "stack_size": 8,
-    "vocabulary_size": twitter_dataset.vocabulary['len_voc'],
+    "vocabulary_size": twitter_dataset.get_vocab_size(),
     "bert_dim_model": 256,
     "multi_heads": 8,
     "learning_rate": 0.001,
@@ -369,7 +424,7 @@ bert = Bert(
     voc_size=parameters["vocabulary_size"],
     dim_model=parameters["bert_dim_model"],
     mh_size=parameters["multi_heads"],
-    padding_idx=twitter_dataset.get_vocabulary_index('PAD')
+    padding_idx=twitter_dataset.get_pad()
 ).to(current_device)
 
 
@@ -388,7 +443,7 @@ def generate_batches(dataset, batch_size, shuffle=True, drop_last=True, device="
         yield data
 
 
-ce_loss = nn.CrossEntropyLoss(ignore_index=twitter_dataset.get_vocabulary_index('PAD'))\
+ce_loss = nn.CrossEntropyLoss() \
     .to(current_device)
 optimizer = optim.Adam(bert.parameters(), lr=parameters['learning_rate'])
 
@@ -408,8 +463,7 @@ optimizer = optim.Adam(bert.parameters(), lr=parameters['learning_rate'])
 def generate_masked_lm(vector, dataset, mask_prob=.15, rnd_t_prob=.1, unchanged_prob=.1):
     return torch.LongTensor([
         replace_token(idx_token, dataset, rnd_t_prob, unchanged_prob)
-        if numpy.random.uniform() < mask_prob
-        and is_not_markers(dataset.vocabulary['tokens'][idx_token])
+        if numpy.random.uniform() < mask_prob and is_not_markers(idx_token, dataset)
         else idx_token
         for idx_token in vector
     ])
@@ -417,31 +471,31 @@ def generate_masked_lm(vector, dataset, mask_prob=.15, rnd_t_prob=.1, unchanged_
 
 # -
 
-def is_not_markers(token):
-    return token not in [MASK, CLS, SEP, PAD]
+def is_not_markers(token, dataset):
+    return token not in [dataset.get_cls(), dataset.get_sep(),
+                         dataset.get_pad(), dataset.get_mask()]
 
 
 def replace_token(token, dataset, rnd_t_prob, unchanged_prob):
     prob = numpy.random.uniform()
     if prob < rnd_t_prob:
-        return replace_by_another_token(token, dataset)
+        return replace_by_another_id(token, dataset)
     if rnd_t_prob < prob < unchanged_prob + rnd_t_prob:
         return token
-    return dataset.vocabulary['tokens'].index(MASK)
+    return dataset.get_mask()
 
 
-def replace_by_another_token(index_token, dataset):
+def replace_by_another_id(index_token, dataset):
     replaced_index_t = index_token
     not_include_t = [
-        dataset.get_vocabulary_index(CLS),
-        dataset.get_vocabulary_index(SEP),
-        dataset.get_vocabulary_index(MASK),
-        dataset.get_vocabulary_index(PAD),
+        dataset.get_cls(),
+        dataset.get_sep(),
+        dataset.get_mask(),
+        dataset.get_pad(),
         index_token
     ]
     while replaced_index_t in not_include_t:
-        replaced_token = random.choice(dataset.vocabulary['tokens'])
-        replaced_index_t = dataset.vocabulary['tokens'].index(replaced_token)
+        replaced_index_t = random.choice(range(twitter_dataset.get_vocab_size()))
     return replaced_index_t
 
 
@@ -473,20 +527,18 @@ class PreTrainingClassifier(nn.Module):
 # ## Pre-Training Step
 # ### Training and Evaluation Loop
 
-classifier = PreTrainingClassifier(parameters['bert_dim_model'], parameters['vocabulary_size'])\
+classifier = PreTrainingClassifier(parameters['bert_dim_model'], parameters['vocabulary_size']) \
     .to(current_device)
 
 # + pycharm={"name": "#%%\n"}
-neptune.init('smeoni/bert-impl', api_token=NEPTUNE_API_TOKEN)
-neptune.create_experiment(name='bert-impl-experiment', params=parameters)
 
 
 def no_learning_loop(corpus, model, no_learn_loss, dataset, no_learn_device):
     dataset.switch_to_dataset(corpus)
     # evaluation loop
     for no_learn_batch in generate_batches(dataset, parameters['batch_size'],
-                                  device=no_learn_device):
-        no_learn_x_obs = generate_batched_masked_lm(no_learn_batch['vectorized_tokens'], dataset)\
+                                           device=no_learn_device):
+        no_learn_x_obs = generate_batched_masked_lm(no_learn_batch['vectorized_tokens'], dataset) \
             .to(no_learn_device)
         no_learn_y_target = no_learn_batch['vectorized_tokens'].to(no_learn_device)
         # Step 1: Compute the forward pass of the model
@@ -494,50 +546,49 @@ def no_learning_loop(corpus, model, no_learn_loss, dataset, no_learn_device):
         no_learn_y_pred = classifier(no_learn_zn)
         # Step 2: Compute the loss value that we wish to optimize
         no_learn_loss_res = no_learn_loss(no_learn_y_pred.reshape(-1, no_learn_y_pred.shape[2]),
-                                      no_learn_y_target.reshape(-1))
+                                          no_learn_y_target.reshape(-1))
         neptune.log_metric(corpus + ' loss', no_learn_loss_res.item())
 
 
-for epoch in range(parameters['epochs']):
-    # train loop
-    twitter_dataset.switch_to_dataset("train")
-    for batch in generate_batches(twitter_dataset,
-                                  parameters['batch_size'],
-                                  device=parameters['device']):
-        x_obs = generate_batched_masked_lm(batch['vectorized_tokens'],
-                                           twitter_dataset).to(current_device)
-        y_target = batch['vectorized_tokens'].to(current_device)
-        # Step 1: Clear the gradients
-        bert.zero_grad()
-        # Step 2: Compute the forward pass of the model
-        bert_zn = bert(x_obs)
-        y_pred = classifier(bert_zn)
-        # Step 3: Compute the loss value that we wish to optimize
-        loss = ce_loss(y_pred.reshape(-1, y_pred.shape[2]), y_target.reshape(-1))
-        # Step 4: Propagate the loss signal backward
-        loss.backward()
-        # Step 5: Trigger the optimizer to perform one update
-        optimizer.step()
-        neptune.log_metric('train loss', loss.item())
-        RAW_TEXT_OBSERVED = ' '.join(twitter_dataset.get_tokens(torch.argmax(y_pred, dim=2)[-1]))
-        neptune.send_text('raw train text observed', RAW_TEXT_OBSERVED
-                          )
-        RAW_TEXT_EXPECTED = ' '.join(twitter_dataset.get_tokens(y_target[-1]))
-        neptune.send_text('raw train text expected', RAW_TEXT_EXPECTED)
+if "TEST_ENV" not in os.environ.keys():
+    neptune.init('smeoni/bert-impl', api_token=NEPTUNE_API_TOKEN)
+    neptune.create_experiment(name='bert-impl-experiment', params=parameters)
+    for epoch in range(parameters['epochs']):
+        # train loop
+        twitter_dataset.switch_to_dataset("train")
+        for batch in generate_batches(twitter_dataset,
+                                      parameters['batch_size'],
+                                      device=parameters['device']):
+            x_obs = generate_batched_masked_lm(batch['vectorized_tokens'],
+                                               twitter_dataset).to(current_device)
+            y_target = batch['vectorized_tokens'].to(current_device)
+            # Step 1: Clear the gradients
+            bert.zero_grad()
+            # Step 2: Compute the forward pass of the model
+            bert_zn = bert(x_obs)
+            y_pred = classifier(bert_zn)
+            # Step 3: Compute the loss value that we wish to optimize
+            loss = ce_loss(y_pred.reshape(-1, y_pred.shape[2]), y_target.reshape(-1))
+            # Step 4: Propagate the loss signal backward
+            loss.backward()
+            # Step 5: Trigger the optimizer to perform one update
+            optimizer.step()
+            neptune.log_metric('train loss', loss.item())
+            observed_ids = torch.argmax(y_pred, dim=2)[-1]
+            RAW_TEXT_OBSERVED = sp.Decode(observed_ids.tolist())
+            neptune.send_text('raw train text observed', RAW_TEXT_OBSERVED)
+            RAW_TEXT_EXPECTED = sp.Decode(y_target[-1].tolist())
+            neptune.send_text('raw train text expected', RAW_TEXT_EXPECTED)
 
-        PATTERN = "CLS (.*?) SEP"
-        neptune.send_text('clean train text observed',
-                          re.search(PATTERN, RAW_TEXT_OBSERVED).group(1)
-                          if re.search(PATTERN, RAW_TEXT_OBSERVED) else 'there is no markers ! ')
-        neptune.send_text('clean train text expected',
-                          re.search(PATTERN, RAW_TEXT_EXPECTED).group(1))
-
-    no_learning_loop('eval', bert, ce_loss, twitter_dataset, parameters['device'])
+        no_learning_loop('eval', bert, ce_loss, twitter_dataset, parameters['device'])
 
 # + [markdown] pycharm={"name": "#%% md\n"}
 # ### Test Loop
 # -
-no_learning_loop('test', bert, ce_loss, twitter_dataset, parameters['device'])
-neptune.stop()
+if "TEST_ENV" not in os.environ.keys():
+    no_learning_loop('test', bert, ce_loss, twitter_dataset, parameters['device'])
+    neptune.stop()
+# ## Experimentation
+
 # + [markdown] pycharm={"name": "#%% md\n"}
 # ## Experimentation
