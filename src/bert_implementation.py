@@ -92,12 +92,13 @@ class Bert(nn.Module):
             self.encoder_layer.append(Encoder(dim_model, mh_size))
 
     def forward(self, tokens):
+        mask = (tokens > 0).unsqueeze(1).repeat(1, tokens.size(1), 1).unsqueeze(1)
         embeddings = self.emb(tokens)
         pos_embedding = positional_enc(embeddings.shape[1], embeddings.shape[2],
                                        self.emb.weight.device.type)
-        z_n = self.encoder_layer[0](pos_embedding + embeddings * math.sqrt(self.dim_model))
+        z_n = pos_embedding + embeddings * math.sqrt(self.dim_model)
         for encoder in self.encoder_layer:
-            z_n = encoder(z_n)
+            z_n = encoder(z_n, mask)
         return z_n
 
 
@@ -117,8 +118,8 @@ class Bert(nn.Module):
 class FeedForwardNetwork(nn.Module):
     def __init__(self, dim_model):
         super().__init__()
-        self.linear_1 = nn.Linear(dim_model, dim_model)
-        self.linear_2 = nn.Linear(dim_model, dim_model)
+        self.linear_1 = nn.Linear(dim_model, dim_model * 4)
+        self.linear_2 = nn.Linear(dim_model * 4, dim_model)
 
     def forward(self, x_n):
         out_l1 = f.relu(self.linear_1(x_n))
@@ -133,8 +134,8 @@ class Encoder(nn.Module):
         self.feed_forward_network = FeedForwardNetwork(dim_model)
         self.add_norm_l2 = AddNormalizeLayer(dim_model)
 
-    def forward(self, x_n):
-        z_n = self.mh_att(x_n)
+    def forward(self, x_n, mask):
+        z_n = self.mh_att(x_n, mask)
         l1_out = self.add_norm_l1(x_n, z_n)
         ffn_out = self.feed_forward_network(l1_out)
         return self.add_norm_l2(l1_out, ffn_out)
@@ -155,19 +156,23 @@ class MultiHeadAttention(nn.Module):
         self.key = nn.Linear(self.dim_model, self.dim_model)
         self.value = nn.Linear(self.dim_model, self.dim_model)
 
-    def forward(self, tokens):
+    def forward(self, tokens, mask):
         batch_size = tokens.shape[0]
-        z_n = self.compute_attention(tokens, batch_size)
-        return self.linear_o(z_n.view(batch_size, -1, self.dim_model))
+        z_n = self.compute_attention(tokens, batch_size, mask)
+        return self.linear_o(z_n.transpose(1, 2).contiguous().view(batch_size, -1, self.dim_model))
 
-    def compute_attention(self, tokens, batch_size):
+    def compute_attention(self, tokens, batch_size, mask):
         d_k = self.dim_model // self.multi_head_size
-        query_mat = self.query(tokens).view(batch_size, -1, self.multi_head_size, d_k)
-        key_mat = self.key(tokens).view(batch_size, -1, self.multi_head_size, d_k)
-        value_mat = self.value(tokens).view(batch_size, -1, self.multi_head_size, d_k)
-        return f.softmax(
-            (query_mat.matmul(key_mat.transpose(-2, -1)) / math.sqrt(self.dim_model)), dim=-1
-        ).matmul(value_mat)
+        query_mat = self.query(tokens).view(batch_size, -1, self.multi_head_size, d_k) \
+            .transpose(2, 1)
+        key_mat = self.key(tokens).view(batch_size, -1, self.multi_head_size, d_k) \
+            .transpose(2, 1)
+        value_mat = self.value(tokens).view(batch_size, -1, self.multi_head_size, d_k) \
+            .transpose(2, 1)
+        scores = (query_mat.matmul(key_mat.transpose(-2, -1)) / math.sqrt(self.dim_model)) \
+            .masked_fill(mask == 0, 1e-11)
+
+        return f.softmax(scores, dim=-1).matmul(value_mat)
 
 
 # + [markdown] pycharm={"name": "#%% md\n"}
@@ -181,14 +186,13 @@ class AddNormalizeLayer(nn.Module):
         self.layer_norm = nn.LayerNorm(normalized_shape)
 
     def forward(self, residual_in, prev_res):
-        xz_sum = residual_in + prev_res
-        return self.layer_norm(xz_sum)
-
+        return residual_in + self.layer_norm(prev_res)
 
 # + [markdown] pycharm={"name": "#%% md\n"}
 # ### Positional Encoding
 
 # + pycharm={"name": "#%%\n"}
+
 
 def positional_enc(seq_len, model_dim, device="cpu"):
     pos_emb_vector = torch.empty(seq_len, model_dim).to(device)
@@ -402,12 +406,13 @@ twitter_dataset = TwitterDataset(train_dt, eval_dt, test_dt, sp)
 
 # + pycharm={"name": "#%%\n"}
 parameters = {
-    "stack_size": 8,
+    "stack_size": 6,
     "vocabulary_size": twitter_dataset.get_vocab_size(),
     "bert_dim_model": 256,
     "multi_heads": 8,
-    "learning_rate": 0.001,
-    "batch_size": 5,
+    "pre_train_learning_rate": 1e-4,
+    "st_learning_rate": 2e-5,
+    "batch_size": 1,
     "epochs": 100,
     "device": current_device,
     "corpus test size": len(test_dt),
@@ -428,6 +433,10 @@ bert = Bert(
 ).to(current_device)
 
 
+ce_loss = nn.CrossEntropyLoss(ignore_index=twitter_dataset.get_pad()) \
+    .to(current_device)
+
+
 def generate_batches(dataset, batch_size, shuffle=True, drop_last=True, device="cpu"):
     """
     A generator function which wraps the PyTorch DataLoader. It will
@@ -442,12 +451,6 @@ def generate_batches(dataset, batch_size, shuffle=True, drop_last=True, device="
             data[name] = data_dict[name].to(device)
         yield data
 
-
-ce_loss = nn.CrossEntropyLoss() \
-    .to(current_device)
-optimizer = optim.Adam(bert.parameters(), lr=parameters['learning_rate'])
-
-
 # + [markdown] pycharm={"name": "#%% md\n"}
 # ## Pre-Training & Fine-Tuning
 # For the Pre-Training, we use instead the RoBERTa learning method.
@@ -460,6 +463,8 @@ optimizer = optim.Adam(bert.parameters(), lr=parameters['learning_rate'])
 
 # + pycharm={"name": "#%%\n"}
 # noinspection PyArgumentList
+
+
 def generate_masked_lm(vector, dataset, mask_prob=.15, rnd_t_prob=.1, unchanged_prob=.1):
     return torch.LongTensor([
         replace_token(idx_token, dataset, rnd_t_prob, unchanged_prob)
@@ -516,40 +521,21 @@ class PreTrainingClassifier(nn.Module):
     def __init__(self, zn_size, voc_size):
         super().__init__()
         self.l_1 = nn.Linear(zn_size, voc_size)
-        self.l_2 = nn.Linear(voc_size, voc_size)
 
     def forward(self, z_n):
-        l1_out = f.relu((self.l_1(z_n)))
-        out = self.l_2(l1_out)
-        return out
+        return self.l_1(z_n)
 
 
 # ## Pre-Training Step
 # ### Training and Evaluation Loop
 
-classifier = PreTrainingClassifier(parameters['bert_dim_model'], parameters['vocabulary_size']) \
-    .to(current_device)
+optimizer = optim.Adam(bert.parameters(), lr=parameters['pre_train_learning_rate'])
+
+pre_train_classifier = PreTrainingClassifier(parameters['bert_dim_model'],
+                                             parameters['vocabulary_size']).to(current_device)
+
 
 # + pycharm={"name": "#%%\n"}
-
-
-def no_learning_loop(corpus, model, no_learn_loss, dataset, no_learn_device):
-    dataset.switch_to_dataset(corpus)
-    # evaluation loop
-    for no_learn_batch in generate_batches(dataset, parameters['batch_size'],
-                                           device=no_learn_device):
-        no_learn_x_obs = generate_batched_masked_lm(no_learn_batch['vectorized_tokens'], dataset) \
-            .to(no_learn_device)
-        no_learn_y_target = no_learn_batch['vectorized_tokens'].to(no_learn_device)
-        # Step 1: Compute the forward pass of the model
-        no_learn_zn = model(no_learn_x_obs)
-        no_learn_y_pred = classifier(no_learn_zn)
-        # Step 2: Compute the loss value that we wish to optimize
-        no_learn_loss_res = no_learn_loss(no_learn_y_pred.reshape(-1, no_learn_y_pred.shape[2]),
-                                          no_learn_y_target.reshape(-1))
-        neptune.log_metric(corpus + ' loss', no_learn_loss_res.item())
-
-
 if "TEST_ENV" not in os.environ.keys():
     neptune.init('smeoni/bert-impl', api_token=NEPTUNE_API_TOKEN)
     neptune.create_experiment(name='bert-impl-experiment', params=parameters)
@@ -566,29 +552,107 @@ if "TEST_ENV" not in os.environ.keys():
             bert.zero_grad()
             # Step 2: Compute the forward pass of the model
             bert_zn = bert(x_obs)
-            y_pred = classifier(bert_zn)
+            y_pred = pre_train_classifier(bert_zn)
             # Step 3: Compute the loss value that we wish to optimize
             loss = ce_loss(y_pred.reshape(-1, y_pred.shape[2]), y_target.reshape(-1))
             # Step 4: Propagate the loss signal backward
             loss.backward()
             # Step 5: Trigger the optimizer to perform one update
             optimizer.step()
-            neptune.log_metric('train loss', loss.item())
+            neptune.log_metric('pre-train loss', loss.item())
             observed_ids = torch.argmax(y_pred, dim=2)[-1]
             RAW_TEXT_OBSERVED = sp.Decode(observed_ids.tolist())
-            neptune.send_text('raw train text observed', RAW_TEXT_OBSERVED)
+            neptune.send_text('raw pre-train text observed', RAW_TEXT_OBSERVED)
             RAW_TEXT_EXPECTED = sp.Decode(y_target[-1].tolist())
-            neptune.send_text('raw train text expected', RAW_TEXT_EXPECTED)
+            neptune.send_text('raw pre-train text expected', RAW_TEXT_EXPECTED)
 
-        no_learning_loop('eval', bert, ce_loss, twitter_dataset, parameters['device'])
+# ## Fine-Tuning Step
 
-# + [markdown] pycharm={"name": "#%% md\n"}
-# ### Test Loop
+# ### Fine-Tuning Classifier
+# a pre-training l_1 is needed to predict the sentiment of a given tweet
+
+# + pycharm={"name": "#%%\n"}
+
+
+class FineTuningClassifier(nn.Module):
+    def __init__(self, zn_size, st_voc_size, voc_size):
+        super().__init__()
+        self.l_1 = nn.Linear(zn_size, voc_size)
+        self.l_2 = nn.Linear(voc_size, st_voc_size)
+
+    def forward(self, z_n):
+        l1_out = f.relu((self.l_1(z_n)))
+        out = self.l_2(l1_out)
+        return out
+
+
 # -
-if "TEST_ENV" not in os.environ.keys():
-    no_learning_loop('test', bert, ce_loss, twitter_dataset, parameters['device'])
-    neptune.stop()
-# ## Experimentation
 
-# + [markdown] pycharm={"name": "#%% md\n"}
-# ## Experimentation
+# ### Fine-Tuning Training Loop
+
+# + pycharm={"name": "#%%\n"}
+fine_tuning_classifier = FineTuningClassifier(parameters['bert_dim_model'],
+                                              len(twitter_dataset.st_voc),
+                                              parameters['vocabulary_size']).to(current_device)
+
+optimizer = optim.Adam(bert.parameters(), lr=parameters['st_learning_rate'])
+
+
+def no_learn_loop(corpus, model, no_learn_loss, dataset, no_learn_device):
+    dataset.switch_to_dataset(corpus)
+    # evaluation loop
+    for no_learn_batch in generate_batches(dataset, parameters['batch_size'],
+                                           device=no_learn_device):
+        no_learn_x_obs = generate_batched_masked_lm(no_learn_batch['vectorized_tokens'], dataset) \
+            .to(no_learn_device)
+        no_learn_y_target = no_learn_batch['vectorized_tokens'].to(no_learn_device)
+        # Step 1: Compute the forward pass of the model
+        no_learn_zn = model(no_learn_x_obs)
+        no_learn_y_pred = fine_tuning_classifier(no_learn_zn)
+        # Step 2: Compute the loss value that we wish to optimize
+        no_ll_res = no_learn_loss(no_learn_y_pred, no_learn_y_target.reshape(-1))
+
+        neptune.log_metric('sentiment ' + corpus + ' loss', no_ll_res.item())
+        neptune.send_text('sentiment ' + corpus + ' text',
+                          sp.Decode(x_obs[-1].tolist()))
+        neptune.send_text('sentiment' + corpus + ' observed',
+                          twitter_dataset.st_voc[torch.argmax(y_pred, dim=-1)[-1]])
+        neptune.send_text('sentiment ' + corpus + ' expected', twitter_dataset.st_voc[y_target[-1]])
+
+
+if "TEST_ENV" not in os.environ.keys():
+    for epoch in range(parameters['epochs']):
+        # train loop
+        twitter_dataset.switch_to_dataset("train")
+        for batch in generate_batches(twitter_dataset,
+                                      parameters['batch_size'],
+                                      device=parameters['device']):
+            x_obs = batch['vectorized_tokens'].to(current_device)
+            y_target = batch['sentiment_i'].to(current_device)
+            # Step 1: Clear the gradients
+            bert.zero_grad()
+            # Step 2: Compute the forward pass of the model
+            bert_zn = bert(x_obs)
+            y_pred = fine_tuning_classifier(bert_zn[:, -1, :])
+            # Step 3: Compute the loss value that we wish to optimize
+            loss = ce_loss(y_pred, y_target.reshape(-1))
+            # Step 4: Propagate the loss signal backward
+            loss.backward()
+            # Step 5: Trigger the optimizer to perform one update
+            optimizer.step()
+            neptune.log_metric('sentiment train loss', loss.item())
+            neptune.send_text('sentiment train text', sp.Decode(x_obs[-1].tolist()))
+            neptune.send_text('sentiment train observed',
+                              twitter_dataset.st_voc[torch.argmax(y_pred, dim=-1)[-1]])
+            neptune.send_text('sentiment train expected',
+                              twitter_dataset.st_voc[y_target[-1]])
+
+        no_learn_loop('eval', bert, ce_loss, twitter_dataset, parameters['device'])
+# -
+
+# ### Fine-Tuning Test Loop
+
+# + pycharm={"name": "#%%\n"}
+if "TEST_ENV" not in os.environ.keys():
+    no_learn_loop('test', bert, ce_loss, twitter_dataset, parameters['device'])
+    neptune.stop()
