@@ -567,13 +567,9 @@ if "TEST_ENV" not in os.environ.keys():
             neptune.send_text('raw pre-train text expected', RAW_TEXT_EXPECTED)
 
 # ## Fine-Tuning Step
-
 # ### Fine-Tuning Classifier
-# a pre-training l_1 is needed to predict the sentiment of a given tweet
 
 # + pycharm={"name": "#%%\n"}
-
-
 class FineTuningClassifier(nn.Module):
     def __init__(self, zn_size, st_voc_size, voc_size):
         super().__init__()
@@ -605,10 +601,10 @@ def no_learn_loop(corpus, model, no_learn_loss, dataset, no_learn_device):
                                            device=no_learn_device):
         no_learn_x_obs = generate_batched_masked_lm(no_learn_batch['vectorized_tokens'], dataset) \
             .to(no_learn_device)
-        no_learn_y_target = no_learn_batch['vectorized_tokens'].to(no_learn_device)
+        no_learn_y_target = no_learn_batch['sentiment_i'].to(no_learn_device)
         # Step 1: Compute the forward pass of the model
         no_learn_zn = model(no_learn_x_obs)
-        no_learn_y_pred = fine_tuning_classifier(no_learn_zn)
+        no_learn_y_pred = fine_tuning_classifier(no_learn_zn[:, -1, :])
         # Step 2: Compute the loss value that we wish to optimize
         no_ll_res = no_learn_loss(no_learn_y_pred, no_learn_y_target.reshape(-1))
 
@@ -650,6 +646,7 @@ if "TEST_ENV" not in os.environ.keys():
         no_learn_loop('eval', bert, ce_loss, twitter_dataset, parameters['device'])
 # -
 
+# + [markdown] pycharm={"name": "#%% md\n"}
 # ### Fine-Tuning Test Loop
 
 # + pycharm={"name": "#%%\n"}
