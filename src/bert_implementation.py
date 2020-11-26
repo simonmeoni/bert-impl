@@ -37,6 +37,8 @@
 import math
 import os
 import random
+import concurrent.futures
+import re
 
 import neptune
 import numpy
@@ -48,6 +50,9 @@ import torch.optim as optim
 from torch import nn
 from torch.nn import functional as f
 from torch.utils.data import Dataset, DataLoader
+import spacy
+
+# !python -m spacy download en_core_web_sm
 
 NEPTUNE_API_TOKEN = os.environ.get("NEPTUNE_API_TOKEN")
 
@@ -188,6 +193,7 @@ class AddNormalizeLayer(nn.Module):
     def forward(self, residual_in, prev_res):
         return residual_in + self.layer_norm(prev_res)
 
+
 # + [markdown] pycharm={"name": "#%% md\n"}
 # ### Positional Encoding
 
@@ -224,8 +230,34 @@ train_csv = train_csv.dropna()
 train_csv = train_csv.reset_index(drop=True)
 test_dt = test_dt.dropna()
 test_dt = test_dt.reset_index(drop=True)
-train_csv['text'] = train_csv['text'].str.lower()
-test_dt['text'] = test_dt['text'].str.lower()
+train_csv.head()
+
+# + [markdown] pycharm={"name": "#%% md\n"}
+# ## get a word tokenisation and lemmatization for each entry
+
+# + pycharm={"name": "#%%\n"}
+nlp = spacy.load("en_core_web_sm", disable=['ner', 'parser'])
+
+
+def processing_text(entry, dataframe, df_idx):
+    text = entry['text'].lower().replace("`", "'").strip()
+    text = ' '.join([token.text
+                     if token.lemma_ == "-PRON-" or '*' in token.text else token.lemma_
+    if not token.is_punct else '' for token in nlp(text)]).strip()
+    text = re.sub(r'http[s]?://\S+', '[URL]', text)
+    dataframe.at[df_idx, 'text'] = re.sub(r'\s\s+', ' ', text)
+
+
+def processing_df(dataframe):
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        future_to_url = {executor.submit(processing_text, entry, dataframe, idx):
+                             entry for idx, entry in enumerate(dataframe.iloc)}
+    for _ in concurrent.futures.as_completed(future_to_url):
+        pass
+
+
+processing_df(test_dt)
+processing_df(train_csv)
 train_csv.head()
 # -
 
@@ -277,7 +309,6 @@ train_csv['sequence length'] = ''
 URL_COUNT = 0
 for idx, d in enumerate(train_csv.iloc):
     train_csv.at[idx, 'sequence length'] = len(sp.EncodeAsIds(d['text']))
-    URL_COUNT = URL_COUNT + 1 if 'http' in d['text'] else URL_COUNT
 for idx, d in enumerate(test_dt.iloc):
     test_dt.at[idx, 'sequence length'] = len(sp.EncodeAsIds(d['text']))
 sns.set(font_scale=2)
@@ -292,7 +323,6 @@ print('number of entries in train.csv : ' + str(len(train_csv)))
 del train_csv['selected_text']
 train_csv = train_csv.drop(train_csv[train_csv['sequence length'].ge(35)].index)
 train_csv = train_csv.drop(train_csv[train_csv['sequence length'].le(5)].index)
-train_csv = train_csv[~train_csv.text.str.contains('http')]
 train_csv = train_csv.reset_index(drop=True)
 print('number of entries in train.csv after filtering : ' + str(len(train_csv)))
 sns.displot(x='sequence length', data=train_csv, aspect=2, height=20)
@@ -432,7 +462,6 @@ bert = Bert(
     padding_idx=twitter_dataset.get_pad()
 ).to(current_device)
 
-
 ce_loss = nn.CrossEntropyLoss(ignore_index=twitter_dataset.get_pad()) \
     .to(current_device)
 
@@ -450,6 +479,7 @@ def generate_batches(dataset, batch_size, shuffle=True, drop_last=True, device="
         for name, _ in data_dict.items():
             data[name] = data_dict[name].to(device)
         yield data
+
 
 # + [markdown] pycharm={"name": "#%% md\n"}
 # ## Pre-Training & Fine-Tuning
@@ -534,7 +564,6 @@ optimizer = optim.Adam(bert.parameters(), lr=parameters['pre_train_learning_rate
 pre_train_classifier = PreTrainingClassifier(parameters['bert_dim_model'],
                                              parameters['vocabulary_size']).to(current_device)
 
-
 # + pycharm={"name": "#%%\n"}
 if "TEST_ENV" not in os.environ.keys():
     neptune.init('smeoni/bert-impl', api_token=NEPTUNE_API_TOKEN)
@@ -565,6 +594,9 @@ if "TEST_ENV" not in os.environ.keys():
             neptune.send_text('raw pre-train text observed', RAW_TEXT_OBSERVED)
             RAW_TEXT_EXPECTED = sp.Decode(y_target[-1].tolist())
             neptune.send_text('raw pre-train text expected', RAW_TEXT_EXPECTED)
+
+
+# -
 
 # ## Fine-Tuning Step
 # ### Fine-Tuning Classifier
@@ -644,7 +676,6 @@ if "TEST_ENV" not in os.environ.keys():
                               twitter_dataset.st_voc[y_target[-1]])
 
         no_learn_loop('eval', bert, ce_loss, twitter_dataset, parameters['device'])
-# -
 
 # + [markdown] pycharm={"name": "#%% md\n"}
 # ### Fine-Tuning Test Loop
