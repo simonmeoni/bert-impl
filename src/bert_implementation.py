@@ -39,6 +39,7 @@ import os
 import random
 import concurrent.futures
 import re
+from pathlib import Path
 
 import neptune
 import numpy
@@ -219,18 +220,25 @@ def positional_enc(seq_len, model_dim, device="cpu"):
 # + pycharm={"name": "#%%\n"}
 TRAIN_PATH = '../input/tweet-sentiment-extraction/train.csv'
 TEST_PATH = '../input/tweet-sentiment-extraction/test.csv'
-train_csv = pd.read_csv(TRAIN_PATH, dtype={'text': 'string'})
-test_dt = pd.read_csv(TEST_PATH, dtype={'text': 'string'})
+PR_TRAIN_PATH = './processed_train.csv'
+PR_TEST_PATH = './processed_test.csv'
+if not Path(PR_TRAIN_PATH).is_file():
+    train_csv = pd.read_csv(TRAIN_PATH, dtype={'text': 'string'})
+    test_dt = pd.read_csv(TEST_PATH, dtype={'text': 'string'})
+else:
+    train_csv = pd.read_csv(PR_TRAIN_PATH, dtype={'text': 'string'})
+    test_dt = pd.read_csv(PR_TEST_PATH, dtype={'text': 'string'})
 # -
 
 # ### Cleaning and Normalization Step before Sentence Piece Training
 
 # + pycharm={"name": "#%%\n"}
-train_csv = train_csv.dropna()
-train_csv = train_csv.reset_index(drop=True)
-test_dt = test_dt.dropna()
-test_dt = test_dt.reset_index(drop=True)
-train_csv.head()
+if not Path(PR_TRAIN_PATH).is_file():
+    train_csv = train_csv.dropna()
+    train_csv = train_csv.reset_index(drop=True)
+    test_dt = test_dt.dropna()
+    test_dt = test_dt.reset_index(drop=True)
+    train_csv.head()
 
 # + [markdown] pycharm={"name": "#%% md\n"}
 # ## get a word tokenisation and lemmatization for each entry
@@ -248,16 +256,18 @@ def processing_text(entry, dataframe, df_idx):
     dataframe.at[df_idx, 'text'] = re.sub(r'\s\s+', ' ', text)
 
 
-def processing_df(dataframe):
+def processing_df(dataframe, path):
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-        future_to_url = {executor.submit(processing_text, entry, dataframe, idx):
-                             entry for idx, entry in enumerate(dataframe.iloc)}
+        future_to_url = {executor.submit(processing_text, df_entry, dataframe, df_idx):
+                         df_entry for df_idx, df_entry in enumerate(dataframe.iloc)}
     for _ in concurrent.futures.as_completed(future_to_url):
         pass
+    dataframe.to_csv(path)
 
 
-processing_df(test_dt)
-processing_df(train_csv)
+if not Path(PR_TRAIN_PATH).is_file():
+    processing_df(test_dt, PR_TEST_PATH)
+    processing_df(train_csv, PR_TRAIN_PATH)
 train_csv.head()
 # -
 
@@ -590,7 +600,8 @@ if "TEST_ENV" not in os.environ.keys():
             optimizer.step()
             neptune.log_metric('pre-train loss', loss.item())
             observed_ids = torch.argmax(y_pred, dim=2)[-1]
-            RAW_TEXT_OBSERVED = sp.Decode(observed_ids.tolist())
+            RAW_TEXT_OBSERVED = sp.Decode([id_obv for id_obv in observed_ids.tolist()
+                                           if id_obv != twitter_dataset.get_mask()])
             neptune.send_text('raw pre-train text observed', RAW_TEXT_OBSERVED)
             RAW_TEXT_EXPECTED = sp.Decode(y_target[-1].tolist())
             neptune.send_text('raw pre-train text expected', RAW_TEXT_EXPECTED)
