@@ -167,3 +167,5 @@ output/
 src/tweet-sentiment-extraction.model
 src/tweet-sentiment-extraction.txt
 src/tweet-sentiment-extraction.vocab
+/src/resources/processed_test.csv
+src/resources/processed_train.csv

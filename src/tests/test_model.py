@@ -1,13 +1,17 @@
 import torch
-from src.bert_implementation import AddNormalizeLayer, Encoder, \
-    MultiHeadAttention, positional_enc, Bert
+
+from src.bert_impl.model.bert.bert import Bert
+from src.bert_impl.model.bert.encoder import Encoder
+from src.bert_impl.model.bert.mh_attention import MultiHeadAttention
+from src.bert_impl.model.bert.norm_layer import NormalizeLayer
+from src.bert_impl.model.bert.pos_encoding import positional_enc
 
 
 def test_compute_attention():
     err = "the size must be equal to this set"
     att = MultiHeadAttention(2, 4)
     test_tensor = torch.rand(6, 4, 4)
-    assert att.compute_attention(test_tensor, 6).shape == (6, 4, 2, 2), err
+    assert att.compute_attention(test_tensor, 6).shape == (6, 2, 4, 2), err
 
 
 def test_multi_head_attention():
@@ -19,7 +23,7 @@ def test_multi_head_attention():
 
 def test_add_normalize_layer():
     err = "the size must be equal to this set"
-    add_norm = AddNormalizeLayer(4)
+    add_norm = NormalizeLayer(4)
     test_zn = torch.rand(3, 2, 4)
     test_xn = torch.rand(3, 2, 4)
     assert add_norm(test_xn, test_zn).shape == (3, 2, 4), err

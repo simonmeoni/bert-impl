@@ -1,8 +1,12 @@
 import pandas as pd
 
-from src.bert_implementation import TwitterDataset, generate_batches, UNK, sp
+import sentencepiece as spm
+from src.bert_impl.dataset.bert_twitter_dataset import TwitterDataset
+from src.bert_impl.utils.utils import UNK, generate_batches
 
-df = pd.read_csv('tests/resources/test_data.csv')
+df = pd.read_csv('./resources/test_data.csv')
+sp = spm.SentencePieceProcessor()
+sp.Load("./resources/test.model")
 dataset = TwitterDataset(df.iloc[:4], df.iloc[4:6], df.iloc[6:9], sp)
 expected_sentiment_list = [UNK, 'negative', 'neutral']
 

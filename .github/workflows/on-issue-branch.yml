@@ -21,41 +21,20 @@ jobs:
       # pylint step
       - uses: cclauss/GitHub-Action-for-pylint@0.7.0
         with:
-          args: 'pylint src/bert_implementation.py'
-      # rm temporarily the init file
-      - uses: JesseTG/rm@v1.0.0
+          args: 'pylint src'
+      - uses: montudor/action-zip@v0.1.1
         with:
-          path: ./src/__init__.py
-
-      - uses: deep5050/autopy-lot@1.1
-        with:
-          github_token: ${{secrets.GITHUB_TOKEN}}
-          input_type: py
-          output_type: ipynb
-          output_dir: './'
-
-      -  uses: actions/upload-artifact@v2
-         with:
-          name: snapshot-${{ github.run_number }}
-          path: src/bert_implementation.ipynb  
-
-      - uses: actions/setup-python@v2
-        with:
-          python-version: 3.8 #install the python needed
-      - run: python deploy_to_kaggle.py
-
-      - uses: harupy/push-kaggle-kernel@master
+          args: zip -qq -r src.zip src
+      - name: Upload datasets
+        uses: jaimevalero/push-kaggle-dataset@v1 # This is the action
         env:
           # Do not leak your credentials.
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
           KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+
         with:
-          id: simonmeoni/bert-twitter-sentiment-extraction
-          title: bert-twitter-sentiment-extraction
-          code_file: src/bert_implementation_to_kaggle.ipynb
-          language: python
-          kernel_type: notebook
-          enable_internet: true
-          competition_sources: tweet-sentiment-extraction
-          is_private: false
-          enable_gpu: true
+          id:  "simonmeoni/tweet-sentiment-extraction-competition"
+          title: "code for tweet sentiment extraction competition"
+          description: "my code for tweet sentiment extraction competition see the repository : https://github.com/simonmeoni/bert-impl"
+          files:  "src.zip"
+          is_public: true

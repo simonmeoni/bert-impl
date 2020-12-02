@@ -1,10 +1,14 @@
 import pandas as pd
 import torch
 
-from src.bert_implementation import TwitterDataset, generate_batched_masked_lm, \
-    generate_batches, generate_masked_lm, replace_by_another_id, sp
+import sentencepiece as spm
+from src.bert_impl.dataset.bert_twitter_dataset import TwitterDataset
+from src.bert_impl.utils.utils import generate_masked_lm, replace_by_another_id, generate_batches, \
+    generate_batched_masked_lm
 
-df_test = pd.read_csv('tests/resources/test_data.csv')
+df_test = pd.read_csv('resources/test_data.csv')
+sp = spm.SentencePieceProcessor()
+sp.Load("./resources/test.model")
 
 
 def test_generate_masked_lm():
