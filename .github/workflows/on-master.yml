@@ -32,8 +32,11 @@ jobs:
             release_name: "Release #${{ github.run_number }}"
             # Text describing the contents of the tag.
             body: ""
+      - uses: montudor/action-zip@v0.1.1
+        with:
+          args: zip -qq -r src.zip src
       - name: Upload datasets
-        uses: jaimevalero/push-kaggle-dataset@v1.0.3 # This is the action
+        uses: jaimevalero/push-kaggle-dataset@v1 # This is the action
         env:
           # Do not leak your credentials.
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
@@ -43,5 +46,5 @@ jobs:
           id:  "simonmeoni/tweet-sentiment-extraction-competition"
           title: "code for tweet sentiment extraction competition"
           description: "my code for tweet sentiment extraction competition see the repository : https://github.com/simonmeoni/bert-impl"
-          files:  src
+          files:  "src.zip"
           is_public: true
