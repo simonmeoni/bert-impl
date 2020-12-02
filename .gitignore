@@ -169,3 +169,4 @@ src/tweet-sentiment-extraction.txt
 src/tweet-sentiment-extraction.vocab
 /src/resources/processed_test.csv
 src/resources/processed_train.csv
+/src/resources/checkpoints/

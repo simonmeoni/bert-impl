@@ -2,6 +2,7 @@ import concurrent.futures as futures
 import os
 import re
 import random
+from datetime import datetime
 
 import numpy
 import torch
@@ -111,3 +112,14 @@ def set_seq_length(dataframe, sentence_piece):
     for idx, entry in enumerate(dataframe.iloc):
         dataframe.at[idx, 'sequence length'] = len(sentence_piece.EncodeAsIds(entry['text']))
     print('number of entries in the dataset : ' + str(len(dataframe)))
+
+
+def get_timestamp():
+    return datetime.now().strftime('%Y-%m-%d-%H-%m-%S')
+
+
+def get_checkpoint_filename(id_fold, prefix="pt_"):
+    path = "./src/resources/checkpoints"
+    if not os.path.exists(path):
+        os.makedirs(path)
+    return path + "/bert_" + prefix + get_timestamp() + '_' + str(id_fold) + '.bin'

@@ -15,7 +15,7 @@ from src.bert_impl.model.bert.bert import Bert
 from src.bert_impl.train.loop import pre_train_loop, fine_tuning_loop
 from src.bert_impl.utils.utils import NEPTUNE_API_TOKEN, PR_TRAIN_PATH, TRAIN_PATH, processing_df, \
     PAD, UNK, \
-    CLS, SEP, set_seq_length
+    CLS, SEP, set_seq_length, get_checkpoint_filename
 
 # set to cuda device if it is available
 if torch.cuda.is_available():
@@ -65,7 +65,7 @@ if "CORPUS_SIZE" in os.environ:
     corpus_size = int(os.environ.get("CORPUS_SIZE"))
     train_csv = train_csv[:corpus_size]
 else:
-    train_csv = train_csv[:80]
+    train_csv = train_csv[:20]
 
 # set the length of the different entries and remove certain cases
 set_seq_length(train_csv, sp)
@@ -85,7 +85,7 @@ parameters = {
     "learning_rate": 1e-4,
     "st_learning_rate": 2e-5,
     "batch_size": 2,
-    "epochs": 100,
+    "epochs": 2,
     "device": current_device,
     "corpus train size": len(train_csv),
     "folds": 8
@@ -100,7 +100,8 @@ neptune.create_experiment(name='bert_impl-experiment', params=parameters)
 folds = KFold(n_splits=parameters['folds'], shuffle=False)
 cv_pt = []
 cv_ft = []
-for fold in folds.split(train_csv):
+
+for id_fold, fold in enumerate(folds.split(train_csv)):
     # set the model
     bert = Bert(
         stack_size=parameters["stack_size"],
@@ -118,10 +119,15 @@ for fold in folds.split(train_csv):
     train_fold, eval_fold = fold
     train_dt = TwitterDataset(train_csv.iloc[train_fold], sp)
     eval_dt = TwitterDataset(train_csv.iloc[eval_fold], sp)
+    # pre train loop
     pre_train_loop(neptune, train_dt, train=True, **parameters)
-    fine_tuning_loop(neptune, train_dt, True, **parameters)
     cv_score_pt = pre_train_loop(neptune, eval_dt, train=False, **parameters)
+    torch.save(bert, get_checkpoint_filename(id_fold=id_fold))
+    # fine tuning loop
+    fine_tuning_loop(neptune, train_dt, True, **parameters)
     cv_score_ft = fine_tuning_loop(neptune, eval_dt, train=False, **parameters)
+    torch.save(bert, get_checkpoint_filename(prefix="ft_", id_fold=id_fold))
+    # logging and metrics
     neptune.log_metric('pre-training cross validation', cv_score_pt)
     neptune.log_metric('fine tuning cross validation', cv_score_ft)
     cv_pt.append(cv_score_pt)
