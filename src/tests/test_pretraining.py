@@ -12,7 +12,7 @@ sp.Load("./resources/test.model")
 
 
 def test_generate_masked_lm():
-    t_dataset = TwitterDataset(df_test.iloc[0:1], df_test.iloc[0:1], df_test.iloc[0:1], sp)
+    t_dataset = TwitterDataset(df_test.iloc[0:1], sp)
     t_dataset.max_seq_len = 15
     # Check if mask function worked
     observed = generate_masked_lm(
@@ -39,7 +39,7 @@ def test_generate_masked_lm():
 
 
 def test_replace_by_another_token():
-    t_dataset = TwitterDataset(df_test.iloc[0:1], df_test.iloc[0:1], df_test.iloc[0:1], sp)
+    t_dataset = TwitterDataset(df_test.iloc[0:1], sp)
 
     replaced_ids = [replace_by_another_id(4, t_dataset) for _ in range(30)]
     replaced_tokens = t_dataset.get_tokens(torch.LongTensor(replaced_ids))
@@ -54,7 +54,7 @@ def test_replace_by_another_token():
 
 
 def test_generate_batched_masked_lm():
-    t_dataset = TwitterDataset(df_test.iloc[0:10], df_test.iloc[0:10], df_test.iloc[0:10], sp)
+    t_dataset = TwitterDataset(df_test.iloc[0:10], sp)
     batch = next(generate_batches(t_dataset, 4))
     batch_masked_lm = generate_batched_masked_lm(batch['vectorized_tokens'], t_dataset)
     assert batch['vectorized_tokens'].shape == batch_masked_lm.shape

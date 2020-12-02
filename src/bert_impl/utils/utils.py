@@ -13,8 +13,8 @@ SEP = 'SEP'
 PAD = 'PAD'
 UNK = 'UNK'
 
-TRAIN_PATH = '../input/tweet-sentiment-extraction/train.csv'
-TEST_PATH = '../input/tweet-sentiment-extraction/test.csv'
+TRAIN_PATH = './input/tweet-sentiment-extraction/train.csv'
+TEST_PATH = './input/tweet-sentiment-extraction/test.csv'
 PR_TRAIN_PATH = './src/resources/processed_train.csv'
 PR_TEST_PATH = './src/resources/processed_test.csv'
 

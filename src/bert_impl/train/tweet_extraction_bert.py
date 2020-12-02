@@ -6,13 +6,15 @@ import pandas as pd
 import sentencepiece as spm
 import spacy
 import torch
+from numpy import mean
+from sklearn.model_selection import KFold
 from torch import nn, optim
 
 from src.bert_impl.dataset.bert_twitter_dataset import TwitterDataset
 from src.bert_impl.model.bert.bert import Bert
 from src.bert_impl.train.loop import pre_train_loop, fine_tuning_loop
-from src.bert_impl.utils.utils import NEPTUNE_API_TOKEN, PR_TRAIN_PATH, TRAIN_PATH, TEST_PATH, \
-    PR_TEST_PATH, processing_df, PAD, UNK, \
+from src.bert_impl.utils.utils import NEPTUNE_API_TOKEN, PR_TRAIN_PATH, TRAIN_PATH, processing_df, \
+    PAD, UNK, \
     CLS, SEP, set_seq_length
 
 # set to cuda device if it is available
@@ -26,15 +28,12 @@ current_device = torch.device(TORCH_DEVICE)
 # initialize corpus
 if not Path(PR_TRAIN_PATH).is_file():
     train_csv = pd.read_csv(TRAIN_PATH, dtype={'text': 'string'})
-    test_dt = pd.read_csv(TEST_PATH, dtype={'text': 'string'})
 else:
     train_csv = pd.read_csv(PR_TRAIN_PATH, dtype={'text': 'string'})
-    test_dt = pd.read_csv(PR_TEST_PATH, dtype={'text': 'string'})
 
 nlp = spacy.load("en_core_web_sm", disable=['ner', 'parser'])
 
 if not Path(PR_TRAIN_PATH).is_file():
-    test_dt = processing_df(test_dt, PR_TEST_PATH, nlp)
     train_csv = processing_df(train_csv, PR_TRAIN_PATH, nlp)
 
 PATH = './src/resources/tweet-sentiment-extraction'
@@ -65,10 +64,8 @@ sp.Load(PATH + '.model')
 if "CORPUS_SIZE" in os.environ:
     corpus_size = int(os.environ.get("CORPUS_SIZE"))
     train_csv = train_csv[:corpus_size]
-    test_dt = test_dt[:corpus_size]
 else:
-    train_csv = train_csv[:100]
-    test_dt = test_dt[:10]
+    train_csv = train_csv[:80]
 
 # set the length of the different entries and remove certain cases
 set_seq_length(train_csv, sp)
@@ -77,71 +74,65 @@ train_csv = train_csv.drop(train_csv[train_csv['sequence length'].ge(35)].index)
 train_csv = train_csv.drop(train_csv[train_csv['sequence length'].le(5)].index)
 train_csv = train_csv.reset_index(drop=True)
 
-len_train_csv = len(train_csv)
-len_test_df = len(test_dt)
-total_size = len_train_csv + len_test_df
-
-train_dt = train_csv.iloc[:int(len_train_csv * 70 / 100)]
-eval_dt = train_csv.iloc[int(len_train_csv * 70 / 100):]
-
-print(
-    """size of train.csv file : {0}
-size of test.csv file : {1}
-total size : {2}
-
-size of train dataset : {3}
-size of eval dataset : {4}
-size of test dataset : {5}
-""".format(
-        len_train_csv,
-        len_test_df,
-        total_size,
-        len(train_dt),
-        len(eval_dt),
-        len(test_dt)))
-
-# set dataset
-twitter_dt = TwitterDataset(train_dt, eval_dt, test_dt, sp)
+print("size of the dataset : {0}".format(len(train_csv)))
 
 # set parameters
 parameters = {
     "stack_size": 6,
-    "vocabulary_size": twitter_dt.get_vocab_size(),
+    "vocabulary_size": sp.vocab_size() + 1,
     "bert_dim_model": 256,
     "multi_heads": 8,
-    "pre_train_learning_rate": 1e-4,
+    "learning_rate": 1e-4,
     "st_learning_rate": 2e-5,
-    "batch_size": 1,
+    "batch_size": 2,
     "epochs": 100,
     "device": current_device,
-    "corpus test size": len(test_dt),
     "corpus train size": len(train_csv),
+    "folds": 8
 }
 
-# set the model
-bert = Bert(
-    stack_size=parameters["stack_size"],
-    voc_size=parameters["vocabulary_size"],
-    dim_model=parameters["bert_dim_model"],
-    mh_size=parameters["multi_heads"],
-    padding_idx=twitter_dt.get_pad()
-).to(current_device)
-
-
-loss = nn.CrossEntropyLoss(ignore_index=twitter_dt.get_pad()) \
+loss = nn.CrossEntropyLoss(ignore_index=sp.pad_id()) \
     .to(current_device)
 
-optimizer = optim.Adam(bert.parameters(), lr=parameters['pre_train_learning_rate'])
-parameters['model'] = bert
-parameters['optimizer'] = optimizer
-parameters['loss'] = loss
 neptune.init('smeoni/bert-impl', api_token=NEPTUNE_API_TOKEN)
 neptune.create_experiment(name='bert_impl-experiment', params=parameters)
 
-# Pre-Training
-pre_train_loop(neptune, twitter_dt, True, **parameters)
+folds = KFold(n_splits=parameters['folds'], shuffle=False)
+cv_pt = []
+cv_ft = []
+for fold in folds.split(train_csv):
+    # set the model
+    bert = Bert(
+        stack_size=parameters["stack_size"],
+        voc_size=parameters["vocabulary_size"],
+        dim_model=parameters["bert_dim_model"],
+        mh_size=parameters["multi_heads"],
+        padding_idx=sp.pad_id()
+    ).to(current_device)
+    parameters['model'] = bert
+    parameters['optimizer'] = optim.Adam(bert.parameters(),
+                                         lr=parameters['learning_rate'])
+    parameters['st_optimizer'] = optim.Adam(bert.parameters(), lr=parameters['st_learning_rate'])
+    parameters['loss'] = loss
 
-# Fine-Tuning
-optimizer = optim.Adam(bert.parameters(), lr=parameters['st_learning_rate'])
-parameters['optimizer'] = optimizer
-fine_tuning_loop(neptune, twitter_dt, True, **parameters)
+    train_fold, eval_fold = fold
+    train_dt = TwitterDataset(train_csv.iloc[train_fold], sp)
+    eval_dt = TwitterDataset(train_csv.iloc[eval_fold], sp)
+    pre_train_loop(neptune, train_dt, train=True, **parameters)
+    fine_tuning_loop(neptune, train_dt, True, **parameters)
+    cv_score_pt = pre_train_loop(neptune, eval_dt, train=False, **parameters)
+    cv_score_ft = fine_tuning_loop(neptune, eval_dt, train=False, **parameters)
+    neptune.log_metric('pre-training cross validation', cv_score_pt)
+    neptune.log_metric('fine tuning cross validation', cv_score_ft)
+    cv_pt.append(cv_score_pt)
+    cv_ft.append(cv_score_ft)
+
+print("""
+cross validation score mean :
+* pre-training : {0}
+* fine-tuning :  {1}
+cross validation scores : 
+* pre-training : {2}
+* fine-tuning :  {3}
+
+""".format(mean(cv_pt), mean(cv_ft), cv_pt, cv_ft))

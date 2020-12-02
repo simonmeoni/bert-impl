@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as f
+from numpy import mean
 from torch import nn
 
 from src.bert_impl.utils.utils import generate_batches, generate_batched_masked_lm
@@ -17,16 +18,14 @@ class PreTrainingClassifier(nn.Module):
 def pre_train_loop(neptune, dataset, train=True, **parameters):
     device = parameters['device']
     model = parameters['model']
-
+    losses = []
     pre_train_classifier = PreTrainingClassifier(parameters['bert_dim_model'],
                                                  parameters['vocabulary_size']).to(device)
-    for _ in range(parameters['epochs']):
+    for _ in range(parameters['epochs'] if train else 1):
         # train loop
-        dataset.switch_to_dataset("train")
         for batch in generate_batches(dataset,
                                       parameters['batch_size'],
                                       device=device):
-
             x_obs = generate_batched_masked_lm(batch['vectorized_tokens'],
                                                dataset).to(device)
             y_target = batch['vectorized_tokens'].to(device)
@@ -41,16 +40,17 @@ def pre_train_loop(neptune, dataset, train=True, **parameters):
                 res_loss.backward()
                 # Step 5: Trigger the optimizer to perform one update
                 parameters['optimizer'].step()
-            neptune.log_metric('pre-train loss', res_loss.item())
-            observed_ids = torch.argmax(y_pred, dim=2)[-1]
+            neptune.log_metric('pt loss' if train else 'eval pt loss', res_loss.item())
             raw_text_observed = dataset.sentence_piece \
-                .Decode([id_obv for id_obv in observed_ids.tolist()
+                .Decode([id_obv for id_obv in torch.argmax(y_pred, dim=2)[-1].tolist()
                          if id_obv != dataset.get_mask()])
             neptune.send_text('raw pre-train text observed'
-                              if train else 'raw eval pre-train text observed', raw_text_observed)
-            neptune.send_text('raw pre-train text expected' if train else
-                              'raw eval pre-train text expected',
+                              if train else 'eval pt text observed', raw_text_observed)
+            neptune.send_text('pt text expected' if train else
+                              'eval pt text expected',
                               dataset.sentence_piece.Decode(y_target[-1].tolist()))
+            losses.append(res_loss.item())
+    return mean(losses)
 
 
 class FineTuningClassifier(nn.Module):
@@ -69,14 +69,12 @@ def fine_tuning_loop(neptune, dataset, train=True, **parameters):
     device = parameters['device']
     model = parameters['model']
     loss = parameters['loss']
-    optimizer = parameters['optimizer']
-
+    losses = []
     fine_tuning_classifier = FineTuningClassifier(parameters['bert_dim_model'],
                                                   len(dataset.st_voc),
                                                   parameters['vocabulary_size']).to(device)
-    for _ in range(parameters['epochs']):
+    for _ in range(parameters['epochs'] if train else 1):
         # train loop
-        dataset.switch_to_dataset("train")
         for batch in generate_batches(dataset,
                                       parameters['batch_size'],
                                       device=device):
@@ -92,11 +90,13 @@ def fine_tuning_loop(neptune, dataset, train=True, **parameters):
                 # Step 4: Propagate the loss signal backward
                 res_loss.backward()
                 # Step 5: Trigger the optimizer to perform one update
-                optimizer.step()
-            neptune.log_metric('sentiment train loss', res_loss.item())
-            neptune.send_text('sentiment train text',
+                parameters['st_optimizer'].step()
+            neptune.log_metric('st loss' if train else 'st eval loss', res_loss.item())
+            neptune.send_text('st text' if train else 'st eval text',
                               dataset.sentence_piece.Decode(x_obs[-1].tolist()))
-            neptune.send_text('sentiment train observed',
+            neptune.send_text('st observed' if train else 'st eval observed',
                               dataset.st_voc[torch.argmax(y_pred, dim=-1)[-1]])
-            neptune.send_text('sentiment train expected',
+            neptune.send_text('st expected' if train else 'st eval expected',
                               dataset.st_voc[y_target[-1]])
+            losses.append(res_loss.item())
+    return mean(losses)
