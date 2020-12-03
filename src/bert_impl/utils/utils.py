@@ -14,13 +14,6 @@ SEP = 'SEP'
 PAD = 'PAD'
 UNK = 'UNK'
 
-TRAIN_PATH = './input/tweet-sentiment-extraction/train.csv'
-TEST_PATH = './input/tweet-sentiment-extraction/test.csv'
-PR_TRAIN_PATH = './src/resources/processed_train.csv'
-PR_TEST_PATH = './src/resources/processed_test.csv'
-
-NEPTUNE_API_TOKEN = os.environ.get("NEPTUNE_API_TOKEN")
-
 
 def processing_text(entry, dataframe, df_idx, spacy_nlp):
     text = entry['text'].lower().replace("`", "'").strip()
@@ -118,8 +111,7 @@ def get_timestamp():
     return datetime.now().strftime('%Y-%m-%d-%H-%m-%S')
 
 
-def get_checkpoint_filename(id_fold, prefix="pt_"):
-    path = "./src/resources/checkpoints"
+def get_checkpoint_filename(id_fold, prefix="pt_", path="./"):
     if not os.path.exists(path):
         os.makedirs(path)
     return path + "/bert_" + prefix + get_timestamp() + '_' + str(id_fold) + '.bin'
