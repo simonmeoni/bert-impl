@@ -12,7 +12,12 @@ class Bert(nn.Module):
                  dim_model, mh_size, padding_idx=0):
         super().__init__()
         self.dim_model = dim_model
-        self.emb = nn.Embedding(
+        self.words_emb = nn.Embedding(
+            embedding_dim=dim_model,
+            num_embeddings=voc_size,
+            padding_idx=padding_idx
+        )
+        self.sentence_emb = nn.Embedding(
             embedding_dim=dim_model,
             num_embeddings=voc_size,
             padding_idx=padding_idx
@@ -21,12 +26,13 @@ class Bert(nn.Module):
         for _ in range(stack_size):
             self.encoder_layer.append(Encoder(dim_model, mh_size))
 
-    def forward(self, tokens):
-        mask = (tokens > 0).unsqueeze(1).repeat(1, tokens.size(1), 1).unsqueeze(1)
-        embeddings = self.emb(tokens)
+    def forward(self, word_tokens, sentence_tokens):
+        mask = (word_tokens > 0).unsqueeze(1).repeat(1, word_tokens.size(1), 1).unsqueeze(1)
+        embeddings = self.words_emb(word_tokens)
+        sentence_tokens = self.sentence_emb(sentence_tokens)
         pos_embedding = positional_enc(embeddings.shape[1], embeddings.shape[2],
-                                       self.emb.weight.device.type)
-        z_n = pos_embedding + embeddings * math.sqrt(self.dim_model)
+                                       self.words_emb.weight.device.type)
+        z_n = pos_embedding + sentence_tokens + embeddings * math.sqrt(self.dim_model)
         for encoder in self.encoder_layer:
             z_n = encoder(z_n, mask)
         return z_n

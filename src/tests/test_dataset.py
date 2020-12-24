@@ -1,14 +1,14 @@
 import pandas as pd
-
 import sentencepiece as spm
+
 from src.bert_impl.dataset.bert_twitter_dataset import TwitterDataset
-from src.bert_impl.utils.utils import UNK, generate_batches
+from src.bert_impl.utils.utils import generate_batches
 
 df = pd.read_csv('./resources/test_data.csv')
 sp = spm.SentencePieceProcessor()
 sp.Load("./resources/test.model")
 dataset = TwitterDataset(df.iloc[:4], sp)
-expected_sentiment_list = [UNK, 'negative', 'neutral']
+expected_sentiment_list = ['negative', 'neutral']
 
 
 def test___init_sentiment_vocab():
@@ -16,32 +16,21 @@ def test___init_sentiment_vocab():
     assert sorted(dataset.st_voc) == expected_sentiment_list, err
 
 
-def test_get_sentiment_i():
-    dataset.st_voc = expected_sentiment_list
-    assert dataset.get_sentiment_i('negative') == 1
-    assert dataset.get_sentiment_i('negative1') == 0
-
-
 def test_vectorize():
     dataset_vectorize = TwitterDataset(df.iloc[0:1], sp)
-
-    err = "the spacial marker must be contained in the tensor"
-
     # vector : [CLS, 'sooo', 'high', SEP, 'MASK']
     # noinspection PyArgumentList
-    observed_v_1 = dataset_vectorize.vectorize("sooo high £¤").tolist()
-    assert len(observed_v_1) == dataset_vectorize.max_seq_len, \
+    observed_v_1 = dataset_vectorize.vectorize("sooo high £¤", "neutral")
+    assert len(observed_v_1[0]) == dataset_vectorize.max_seq_len + 5, \
         "the tensor must have this size"
-    assert 2 in observed_v_1, err
-    assert 3 in observed_v_1, err
-    assert 1 in observed_v_1, err
-    assert 0 in observed_v_1, err
+    assert dataset.sentence_piece.decode(observed_v_1[0].tolist()) == 'neutral sooo high  ⁇ '
 
 
 def test_generate_batches():
     test_dataset = TwitterDataset(df.iloc[0:10], sp)
-    batch = next(generate_batches(test_dataset, 2))
-    assert len(batch) == 2
+    print(test_dataset.max_seq_len)
+    batch = next(generate_batches(test_dataset, 10))
+    assert len(batch) == 5
 
 
 def test_get_tokens():
@@ -49,6 +38,6 @@ def test_get_tokens():
     t_dataset = TwitterDataset(df.iloc[7:8], sp)
     t_dataset.max_seq_len = 3
     expected_sentence = "soooo high"
-    vector = t_dataset.vectorize(expected_sentence)
-    observed = t_dataset.get_tokens(vector)
-    assert expected_sentence == observed, err
+    vector = t_dataset.vectorize(expected_sentence, 'neutral')
+    observed = t_dataset.get_tokens(vector[0])
+    assert 'neutral  ' + expected_sentence == observed, err

@@ -60,4 +60,4 @@ def test_bert():
         dim_model=4,
         mh_size=4
     ).to("cpu")
-    assert bert(test_tensor).shape == (2, 3, 4), err
+    assert bert(test_tensor, test_tensor).shape == (2, 3, 4), err

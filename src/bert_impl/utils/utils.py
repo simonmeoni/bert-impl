@@ -1,4 +1,5 @@
 import concurrent.futures as futures
+import glob
 import os
 import re
 import random
@@ -15,27 +16,25 @@ PAD = 'PAD'
 UNK = 'UNK'
 
 
-def processing_text(entry, dataframe, df_idx, spacy_nlp):
-    text = entry['text'].lower().replace("`", "'").strip()
-    text = ' '.join([token.text
-                     if token.lemma_ == "-PRON-" or '*' in token.text else token.lemma_
-                     if not token.is_punct else '' for token in spacy_nlp(text)]).strip()
-    text = re.sub(r'http[s]?://\S+', '[URL]', text)
-    dataframe.at[df_idx, 'text'] = re.sub(r'\s\s+', ' ', text)
+def processing_text(entry, df_idx, spacy_nlp, column):
+    text = entry[column].lower().replace("`", "'").strip()
+    text = ' '.join([token.text for token in spacy_nlp(text) if not token.is_punct])
+    text = re.sub(r'http[s]?://\S+', '[URL]', text).strip()
+    return text, df_idx
 
 
-def processing_df(dataframe, path, spacy_nlp):
+def processing_df(dataframe, spacy_nlp):
     dataframe = dataframe.dropna()
     dataframe = dataframe.reset_index(drop=True)
-
+    column = 'text'
     with futures.ThreadPoolExecutor(max_workers=10) as executor:
-        future_to_url = {executor.submit(processing_text, df_entry, dataframe, df_idx, spacy_nlp):
-                             df_entry for df_idx, df_entry in enumerate(dataframe.iloc)}
-    for _ in futures.as_completed(future_to_url):
-        pass
-    dataframe = dataframe[dataframe['text'] != '']
+        future_text = {executor.submit(processing_text, df_entry, df_idx, spacy_nlp, column):
+                           df_entry for df_idx, df_entry in enumerate(dataframe.iloc)}
+        for future in futures.as_completed(future_text):
+            res = future.result()
+            dataframe.at[res[1], column] = res[0]
+    dataframe = dataframe[dataframe[column] != '']
     dataframe = dataframe.reset_index(drop=True)
-    dataframe.to_csv(path)
     return dataframe
 
 
@@ -81,8 +80,11 @@ def generate_batches(dataset, batch_size, shuffle=True, drop_last=True, device="
 
     for data_dict in data_loader:
         data = {}
-        for name, _ in data_dict.items():
-            data[name] = data_dict[name].to(device)
+        for name, value in data_dict.items():
+            if isinstance(value, torch.Tensor):
+                data[name] = value.to(device)
+            else:
+                data[name] = value
         yield data
 
 
@@ -108,10 +110,70 @@ def set_seq_length(dataframe, sentence_piece):
 
 
 def get_timestamp():
-    return datetime.now().strftime('%Y-%m-%d-%H-%m-%S')
+    return datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
 
 
 def get_checkpoint_filename(id_fold, prefix="pt_", path="./"):
     if not os.path.exists(path):
         os.makedirs(path)
     return path + "/bert_" + prefix + get_timestamp() + '_' + str(id_fold) + '.bin'
+
+
+def create_sp_model(dataframe, path, spm):
+    with open(path + '.txt', 'w') as voc_txt:
+        for t_entry in dataframe['text']:
+            voc_txt.write(t_entry + '\n')
+        for sentiment in dataframe["sentiment"].unique().tolist():
+            voc_txt.write(sentiment + '\n')
+    # initialize sentence piece
+    spm_args = "" \
+               "--input={0}.txt " \
+               "--model_prefix={0} " \
+               "--pad_id=0 " \
+               "--unk_id=1 " \
+               "--bos_id=2 " \
+               "--eos_id=3 " \
+               "--pad_piece={1} " \
+               "--unk_piece={2} " \
+               "--bos_piece={3} " \
+               "--eos_piece={4}" \
+               "--token_size=8000" \
+        .format(path, PAD, UNK, CLS, SEP)
+    spm.SentencePieceTrainer.Train(spm_args)
+    sentence_piece = spm.SentencePieceProcessor()
+
+    return sentence_piece
+
+
+def filter_selected_text(df_entry, df_idx, nlp, sentence_piece):
+    pr_selected_text = processing_text(df_entry, df_idx, nlp, 'selected_text')
+    selected_pieces = sentence_piece.EncodeAsPieces(pr_selected_text[0])
+    return df_idx, [0 if piece not in selected_pieces else 1
+                    for piece in sentence_piece.EncodeAsPieces(df_entry['text'])], pr_selected_text[
+               0]
+
+
+def filter_selected_text_df(dataframe, nlp, sentence_piece):
+    dataframe["selected_vector"] = ''
+    with futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future_text = {executor.submit(filter_selected_text, df_entry, df_idx, nlp, sentence_piece):
+                           df_entry for df_idx, df_entry in enumerate(dataframe.iloc)}
+        for future in futures.as_completed(future_text):
+            res = future.result()
+            dataframe.at[res[0], 'selected_text'] = res[2]
+            dataframe.at[res[0], 'selected_vector'] = res[1]
+
+    dataframe = dataframe[dataframe['selected_vector'] != '']
+    dataframe = dataframe.reset_index(drop=True)
+    return dataframe
+
+
+def decode_sel_vector(word_emb_vector, dataset, select_vector):
+    return dataset.sentence_piece.Decode(
+        word_emb_vector[select_vector == 1].tolist())
+
+
+def remove_checkpoints(checkpoint_path):
+    files = glob.glob(checkpoint_path + "/*.bin")
+    for file in files:
+        os.remove(file)
