@@ -154,14 +154,17 @@ def extract_selected_text(df_entry, df_idx, nlp, sentence_piece):
     end_ind = 0
     len_encoded_sentence = len(encoded_sentence)
     len_selected_pieces = len(selected_pieces)
-
+    found = False
     for start_ind in range(len_encoded_sentence):
         end_ind = start_ind + len_selected_pieces
-        if end_ind < len_encoded_sentence \
-                and encoded_sentence[start_ind:end_ind] == selected_pieces:
+        if encoded_sentence[start_ind:end_ind] == selected_pieces:
+            found = True
             break
-    selected_vector = [0] * len_encoded_sentence
-    selected_vector[start_ind:end_ind] = [1] * len_selected_pieces
+    if found:
+        selected_vector = [0] * len_encoded_sentence
+        selected_vector[start_ind:end_ind] = [1] * len_selected_pieces
+    else:
+        return df_idx, '', pr_selected_text[0]
     return df_idx, selected_vector, pr_selected_text[0]
 
 
