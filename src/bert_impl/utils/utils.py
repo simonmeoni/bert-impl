@@ -18,7 +18,8 @@ UNK = 'UNK'
 
 def processing_text(entry, df_idx, spacy_nlp, column):
     text = entry[column].lower().replace("`", "'").strip()
-    text = ' '.join([token.text for token in spacy_nlp(text) if not token.is_punct])
+    text = ' '.join([token.text for token in spacy_nlp(text) if not token.is_punct
+                     or token.text == "*"])
     text = re.sub(r'http[s]?://\S+', '[URL]', text).strip()
     return text, df_idx
 
@@ -145,19 +146,31 @@ def create_sp_model(dataframe, path, spm):
     return sentence_piece
 
 
-def filter_selected_text(df_entry, df_idx, nlp, sentence_piece):
+def extract_selected_text(df_entry, df_idx, nlp, sentence_piece):
     pr_selected_text = processing_text(df_entry, df_idx, nlp, 'selected_text')
     selected_pieces = sentence_piece.EncodeAsPieces(pr_selected_text[0])
-    return df_idx, [0 if piece not in selected_pieces else 1
-                    for piece in sentence_piece.EncodeAsPieces(df_entry['text'])], pr_selected_text[
-               0]
+    encoded_sentence = sentence_piece.EncodeAsPieces(df_entry['text'])
+    start_ind = 0
+    end_ind = 0
+    len_encoded_sentence = len(encoded_sentence)
+    len_selected_pieces = len(selected_pieces)
+
+    for start_ind in range(len_encoded_sentence):
+        end_ind = start_ind + len_selected_pieces
+        if end_ind < len_encoded_sentence \
+                and encoded_sentence[start_ind:end_ind] == selected_pieces:
+            break
+    selected_vector = [0] * len_encoded_sentence
+    selected_vector[start_ind:end_ind] = [1] * len_selected_pieces
+    return df_idx, selected_vector, pr_selected_text[0]
 
 
 def filter_selected_text_df(dataframe, nlp, sentence_piece):
     dataframe["selected_vector"] = ''
     with futures.ThreadPoolExecutor(max_workers=1) as executor:
-        future_text = {executor.submit(filter_selected_text, df_entry, df_idx, nlp, sentence_piece):
-                           df_entry for df_idx, df_entry in enumerate(dataframe.iloc)}
+        future_text = {
+            executor.submit(extract_selected_text, df_entry, df_idx, nlp, sentence_piece):
+                df_entry for df_idx, df_entry in enumerate(dataframe.iloc)}
         for future in futures.as_completed(future_text):
             res = future.result()
             dataframe.at[res[0], 'selected_text'] = res[2]

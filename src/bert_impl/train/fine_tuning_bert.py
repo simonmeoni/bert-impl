@@ -74,7 +74,7 @@ def fine_tune_bert_model(train_path,
     loaded_model = torch.load(pretrain_model_path)
     for id_fold, fold in enumerate(folds.split(train_csv)):
         # set the model
-        bert = parameters['model'] = loaded_model['model']
+        bert = parameters['model'] = loaded_model['model'].to(current_device)
         parameters['stack_size'] = loaded_model['stack_size']
         parameters["bert_dim_model"] = loaded_model['bert_dim_model']
         parameters["multi_heads"] = loaded_model["multi_heads"]
