@@ -9,7 +9,7 @@ class TwitterDataset(Dataset):
         self.dataset = dataset
         self.st_voc = []
         self.sentence_piece = sentence_piece
-        self.max_seq_len = int(dataset['sequence length'].max())
+        self.max_seq_len = 0
         self.__init_sentiment_vocab()
 
     def __init_sentiment_vocab(self):

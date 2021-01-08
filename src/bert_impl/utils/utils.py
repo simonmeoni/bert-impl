@@ -77,8 +77,7 @@ def generate_batches(dataset, batch_size, shuffle=True, drop_last=True, device="
     ensure each tensor is on the write device location.
     """
     data_loader = DataLoader(dataset=dataset, batch_size=batch_size,
-                             shuffle=shuffle, drop_last=drop_last)
-
+                             shuffle=shuffle, drop_last=drop_last, collate_fn=collate_fn)
     for data_dict in data_loader:
         data = {}
         for name, value in data_dict.items():
@@ -87,6 +86,23 @@ def generate_batches(dataset, batch_size, shuffle=True, drop_last=True, device="
             else:
                 data[name] = value
         yield data
+
+
+def collate_fn(batch):
+    res_batch = {batch_key: [] for batch_key in batch[0].keys()}
+    max_len = max(len(el['words_embedding']) for el in batch)
+
+    for elem in batch:
+        for key, value in elem.items():
+            if isinstance(value, torch.Tensor):
+                padded_list = [0] * (max_len - len(value))
+                padded_vector = torch.cat((value, torch.LongTensor(padded_list)))
+                res_batch[key].append(padded_vector)
+            else:
+                res_batch[key].append(value)
+    res_batch = {k: (torch.stack(v) if isinstance(v[0], torch.Tensor) else v)
+                 for k, v in res_batch.items()}
+    return res_batch
 
 
 def replace_by_another_id(index_token, dataset):

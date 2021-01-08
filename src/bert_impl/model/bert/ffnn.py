@@ -9,5 +9,5 @@ class FeedForwardNetwork(nn.Module):
         self.linear_2 = nn.Linear(dim_model * 4, dim_model)
 
     def forward(self, x_n):
-        out_l1 = f.relu(self.linear_1(x_n))
+        out_l1 = f.gelu(self.linear_1(x_n))
         return self.linear_2(out_l1)

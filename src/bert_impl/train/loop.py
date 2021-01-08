@@ -55,12 +55,11 @@ def masked_task(batch, dataset, masked_classifier, **parameters):
     device = parameters['device']
     words_emb_masked = generate_batched_masked_lm(batch['words_embedding'],
                                                   dataset).to(device)
-    sentence_emb = batch['sentence_embedding']
     y_target = batch['words_embedding'].to(device)
     # Step 1: Clear the gradients
     model.zero_grad()
     # Step 2: Compute the forward pass of the model
-    y_pred = masked_classifier(model(words_emb_masked, sentence_emb))
+    y_pred = masked_classifier(model(words_emb_masked, y_target))
     # Step 3: Compute the loss value that we wish to optimize
     res_loss = loss(y_pred.reshape(-1, y_pred.shape[2]), y_target.reshape(-1))
     return y_pred, y_target, res_loss
@@ -116,7 +115,8 @@ def fine_tuning_loop(neptune, dataset, train=True, **parameters):
             y_pred = fine_tuning_classifier(
                 model(batch['words_embedding'], batch['sentence_embedding']).transpose(2, 1))
             # Step 3: Compute the loss value that we wish to optimize
-            res_loss = parameters['loss'](y_pred.transpose(1, 2).view(-1, 2), y_target.reshape(-1))
+            res_loss = parameters['loss'](y_pred.transpose(1, 2).reshape(-1, 2),
+                                          y_target.reshape(-1))
             if train:
                 # Step 4: Propagate the loss signal backward
                 res_loss.backward()

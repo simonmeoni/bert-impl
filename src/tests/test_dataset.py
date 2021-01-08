@@ -21,8 +21,6 @@ def test_vectorize():
     # vector : [CLS, 'sooo', 'high', SEP, 'MASK']
     # noinspection PyArgumentList
     observed_v_1 = dataset_vectorize.vectorize("sooo high £¤", "neutral")
-    assert len(observed_v_1[0]) == dataset_vectorize.max_seq_len + 5, \
-        "the tensor must have this size"
     assert dataset.sentence_piece.decode(observed_v_1[0].tolist()) == 'neutral sooo high  ⁇ '
 
 

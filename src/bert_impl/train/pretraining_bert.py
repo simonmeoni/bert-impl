@@ -78,7 +78,8 @@ def pretrain_bert_model(train_path,
     ).to(current_device)
     parameters['model'] = bert
     parameters['optimizer'] = optim.Adam(bert.parameters(),
-                                         lr=parameters['learning_rate'])
+                                         lr=parameters['learning_rate'], weight_decay=0.01,
+                                         betas=(0.9, 0.999))
     parameters['loss'] = loss
     twitter_dt = TwitterDataset(pretrain_dt, sentence_piece)
     # pre train loop
