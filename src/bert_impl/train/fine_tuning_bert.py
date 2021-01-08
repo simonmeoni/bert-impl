@@ -43,7 +43,7 @@ def fine_tune_bert_model(train_path,
         train_csv = pd.read_pickle(ft_train_path)
         train_csv.astype(object)
     else:
-        train_csv = pd.read_csv(train_path, dtype={'text': 'string'})[:20]
+        train_csv = pd.read_csv(train_path, dtype={'text': 'string'})
         nlp = spacy.load("en_core_web_sm", disable=['ner', 'parser'])
         train_csv = processing_df(train_csv, nlp)
         train_csv = train_csv[train_csv['sentiment'] != 'neutral']
@@ -70,7 +70,8 @@ def fine_tune_bert_model(train_path,
     neptune.init('smeoni/bert-impl', api_token=neptune_api_token)
     neptune.create_experiment(name='bert_impl-experiment', params=parameters)
     folds = KFold(n_splits=parameters['folds'], shuffle=False)
-    cv_ft = []
+    cv_ft_loss = []
+    cv_ft_jaccard = []
     loaded_model = torch.load(pretrain_model_path)
     for id_fold, fold in enumerate(folds.split(train_csv)):
         # set the model
@@ -86,18 +87,25 @@ def fine_tune_bert_model(train_path,
         eval_dt = TwitterDataset(train_csv.iloc[eval_fold], sentence_piece)
         # fine tuning loop
         fine_tuning_loop(neptune, train_dt, True, **parameters)
-        cv_score_ft = fine_tuning_loop(neptune, eval_dt, train=False, **parameters)
+        cv_score_ft, jaccard_score = fine_tuning_loop(neptune, eval_dt, train=False, **parameters)
         # logging and metrics
         torch.save(bert, get_checkpoint_filename(prefix="ft_", id_fold=id_fold,
                                                  path=save_model_path))
-        neptune.log_metric('fine tuning cross validation', cv_score_ft)
-        cv_ft.append(cv_score_ft)
-    m_cv_ft = mean(cv_ft)
+        neptune.log_metric('fine tuning loss cross validation', cv_score_ft)
+        neptune.log_metric('fine tuning jaccard score cross validation', jaccard_score)
+        cv_ft_loss.append(cv_score_ft)
+        cv_ft_jaccard.append(jaccard_score)
+    mean_cv_ft_loss = mean(cv_ft_loss)
+    mean_cv_ft_jaccard = mean(cv_ft_jaccard)
     print("""
-cross validation score mean :
+loss cross validation score mean :
 * fine-tuning :  {0}
-cross validation scores :
+loss cross validation scores :
 * fine-tuning :  {1}
-    """.format(m_cv_ft, cv_ft))
+jaccard cross validation score mean :
+* fine-tuning :  {2}
+jaccard cross validation scores :
+* fine-tuning :  {3}
+    """.format(mean_cv_ft_loss, cv_ft_loss, mean_cv_ft_jaccard, cv_ft_jaccard))
 
-    neptune.log_metric('mean fine tuning cross validation', m_cv_ft)
+    neptune.log_metric('mean fine tuning cross validation', mean_cv_ft_loss)

@@ -3,7 +3,7 @@ import torch
 from torch import nn
 
 from src.bert_impl.utils.utils import generate_batches, generate_batched_masked_lm, \
-    decode_sel_vector, get_checkpoint_filename, remove_checkpoints
+    decode_sel_vector, get_checkpoint_filename, remove_checkpoints, jaccard_score
 
 
 class PreTrainingClassifier(nn.Module):
@@ -102,6 +102,7 @@ def fine_tuning_loop(neptune, dataset, train=True, **parameters):
     device = parameters['device']
     model = parameters['model']
     losses = []
+    jaccard_scores = []
     fine_tuning_classifier = FineTuningClassifier(parameters['bert_dim_model']).to(device)
     for _ in range(parameters['epochs'] if train else 1):
         # train loop
@@ -122,14 +123,23 @@ def fine_tuning_loop(neptune, dataset, train=True, **parameters):
                 res_loss.backward()
                 # Step 5: Trigger the optimizer to perform one update
                 parameters['st_optimizer'].step()
-            observed_text = decode_sel_vector(batch['words_embedding'][-1],
-                                              dataset, y_pred.transpose(1, 2)[-1].argmax(dim=-1))
-            expected_text = decode_sel_vector(batch['words_embedding'][-1], dataset, y_target[-1])
-            neptune.log_metric('st loss' if train else 'st eval loss', res_loss.item())
-            neptune.send_text('selected text expected'
-                              if train else 'selected eval text expected', expected_text)
-            neptune.send_text('selected text observed'
-                              if train else 'selected eval text observed', observed_text)
-
+            score = fine_tuning_monitoring(batch, dataset, neptune,
+                                           res_loss, train, y_pred, y_target)
             losses.append(res_loss.item())
-    return np.mean(losses)
+            jaccard_scores.append(score)
+    return np.mean(losses), np.mean(jaccard_scores)
+
+
+# pylint: disable=too-many-arguments
+def fine_tuning_monitoring(batch, dataset, neptune, res_loss, train, y_pred, y_target):
+    observed_text = decode_sel_vector(batch['words_embedding'][-1],
+                                      dataset, y_pred.transpose(1, 2)[-1].argmax(dim=-1))
+    expected_text = decode_sel_vector(batch['words_embedding'][-1], dataset, y_target[-1])
+    neptune.log_metric('st loss' if train else 'st eval loss', res_loss.item())
+    score = jaccard_score(expected_text, observed_text)
+    neptune.log_metric('jaccard score' if train else 'eval jaccard score', score)
+    neptune.send_text('selected text expected'
+                      if train else 'selected eval text expected', expected_text)
+    neptune.send_text('selected text observed'
+                      if train else 'selected eval text observed', observed_text)
+    return score
